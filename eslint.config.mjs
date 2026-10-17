@@ -30,6 +30,7 @@ const eslintConfig = defineConfig([
           fixStyle: 'inline-type-imports',
         },
       ],
+      'react-hooks/set-state-in-effect': 'warn',
     },
   },
   prettierConfig,

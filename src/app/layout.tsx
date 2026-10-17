@@ -1,6 +1,9 @@
 import type { Metadata, Viewport } from 'next';
+import type { ReactNode } from 'react';
 import { Geist, Geist_Mono } from 'next/font/google';
 import { ToastProvider } from '@/providers/toast-provider';
+import { AuthProvider } from '@/providers/auth-provider';
+import { ChatProvider } from '@/providers/chat-provider';
 import { Toaster } from '@/components/ui/toaster';
 import { APP_NAME, APP_TAGLINE } from '@/lib/constants';
 import './globals.css';
@@ -63,7 +66,7 @@ export const viewport: Viewport = {
   maximumScale: 5,
 };
 
-export default function RootLayout({ children }: LayoutProps<'/'>) {
+export default function RootLayout({ children }: { children: ReactNode }) {
   return (
     <html
       lang="en"
@@ -72,8 +75,12 @@ export default function RootLayout({ children }: LayoutProps<'/'>) {
     >
       <body className="bg-bg text-fg min-h-full font-sans">
         <ToastProvider>
-          {children}
-          <Toaster />
+          <AuthProvider>
+            <ChatProvider>
+              {children}
+              <Toaster />
+            </ChatProvider>
+          </AuthProvider>
         </ToastProvider>
       </body>
     </html>
