@@ -25,7 +25,8 @@
     "remark-gfm": "^4.0.1",
     "tailwind-merge": "^3.7.0",
     "tw-animate-css": "^1.0.0",
-    "unpdf": "^1.9.0"
+    "unpdf": "^1.9.0",
+    "zod": "^4.6.7"
   },
   "devDependencies": {
     "@tailwindcss/turbopack": "^4",
