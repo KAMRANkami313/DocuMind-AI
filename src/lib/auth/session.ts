@@ -9,13 +9,15 @@ export interface SessionResult {
   identifier: string;
 }
 
-interface AuthCookiePayload {
-  user: {
+interface StoredSession {
+  access_token?: string;
+  refresh_token?: string;
+  expires_at?: number;
+  user?: {
     id: string;
     email?: string;
     created_at?: string;
-  } | null;
-  access_token: string | null;
+  };
 }
 
 function extractProjectRef(url: string): string {
@@ -44,6 +46,21 @@ async function readAuthCookie(): Promise<string | null> {
   return chunks.length > 0 ? chunks.join('') : null;
 }
 
+function parseSessionCookie(cookieValue: string): StoredSession | null {
+  if (!cookieValue) return null;
+  if (cookieValue.startsWith('{')) {
+    try {
+      return JSON.parse(cookieValue) as StoredSession;
+    } catch {
+      return null;
+    }
+  }
+  if (cookieValue.startsWith('eyJ')) {
+    return { access_token: cookieValue };
+  }
+  return null;
+}
+
 async function getAnonymousIdentifier(): Promise<string> {
   const headersList = await headers();
   const forwarded = headersList.get('x-forwarded-for');
@@ -56,43 +73,35 @@ async function getAnonymousIdentifier(): Promise<string> {
   return 'ip:unknown';
 }
 
-async function validateToken(token: string): Promise<AuthCookiePayload> {
+export async function resolveSession(): Promise<SessionResult> {
+  const anonymousId = await getAnonymousIdentifier();
+  const cookieValue = await readAuthCookie();
+  if (!cookieValue) {
+    return { user: null, accessToken: null, identifier: anonymousId };
+  }
+
+  const stored = parseSessionCookie(cookieValue);
+  if (!stored?.access_token) {
+    return { user: null, accessToken: null, identifier: anonymousId };
+  }
+
+  const accessToken = stored.access_token;
   const supabase = createClient(env.supabase.url, env.supabase.anonKey, {
     auth: { persistSession: false, autoRefreshToken: false },
   });
-  const { data, error } = await supabase.auth.getUser(token);
+  const { data, error } = await supabase.auth.getUser(accessToken);
   if (error || !data.user) {
-    return { user: null, access_token: null };
+    return { user: null, accessToken: null, identifier: anonymousId };
   }
+
   return {
     user: {
       id: data.user.id,
-      email: data.user.email ?? undefined,
-      created_at: data.user.created_at,
+      email: data.user.email ?? '',
+      createdAt: data.user.created_at,
     },
-    access_token: token,
-  };
-}
-
-export async function resolveSession(): Promise<SessionResult> {
-  const anonymousId = await getAnonymousIdentifier();
-  const token = await readAuthCookie();
-  if (!token) {
-    return { user: null, accessToken: null, identifier: anonymousId };
-  }
-  const payload = await validateToken(token);
-  if (!payload.user) {
-    return { user: null, accessToken: null, identifier: anonymousId };
-  }
-  const user: User = {
-    id: payload.user.id,
-    email: payload.user.email ?? '',
-    createdAt: payload.user.created_at,
-  };
-  return {
-    user,
-    accessToken: payload.access_token,
-    identifier: `user:${user.id}`,
+    accessToken,
+    identifier: `user:${data.user.id}`,
   };
 }
 

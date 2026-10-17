@@ -2,7 +2,7 @@ import { type NextRequest, NextResponse } from 'next/server';
 import { extractPagesFromPdf } from '@/lib/pdf/extractor';
 import { splitTextIntoChunks } from '@/lib/pdf/chunker';
 import { generateEmbedding } from '@/lib/ai/embedding';
-import { supabaseAdmin, createClientForUser } from '@/lib/supabase/server';
+import { supabaseAdmin } from '@/lib/supabase/server';
 import { resolveSession } from '@/lib/auth/session';
 import { validatePdfFile } from '@/lib/validation/file';
 import { rateLimit } from '@/lib/rate-limit';
@@ -78,9 +78,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const insertClient = session.accessToken
-      ? createClientForUser(session.accessToken)
-      : supabaseAdmin;
+    const insertClient = supabaseAdmin;
     const userId = session.user?.id ?? null;
 
     const { data: document, error: docError } = await insertClient

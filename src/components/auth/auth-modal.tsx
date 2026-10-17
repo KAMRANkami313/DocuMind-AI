@@ -1,24 +1,37 @@
 'use client';
 
-import React, { useState } from 'react';
+import * as React from 'react';
 import { supabase } from '@/lib/supabase/client';
 import { X, Mail, Lock, Loader2, Sparkles, CheckCircle2 } from 'lucide-react';
+import { Dialog } from '@/components/ui/dialog';
+import type { User } from '@/types';
+import { cn } from '@/lib/utils';
 
 interface AuthModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onSuccess: (user: any) => void;
+  onSuccess?: (user: User) => void;
+}
+
+interface SupabaseAuthUser {
+  id: string;
+  email?: string;
 }
 
 export function AuthModal({ isOpen, onClose, onSuccess }: AuthModalProps) {
-  const [isSignUp, setIsSignUp] = useState(false);
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [loading, setLoading] = useState(false);
-  const [errorMsg, setErrorMsg] = useState('');
-  const [successMsg, setSuccessMsg] = useState('');
+  const [isSignUp, setIsSignUp] = React.useState(false);
+  const [email, setEmail] = React.useState('');
+  const [password, setPassword] = React.useState('');
+  const [loading, setLoading] = React.useState(false);
+  const [errorMsg, setErrorMsg] = React.useState('');
+  const [successMsg, setSuccessMsg] = React.useState('');
 
-  if (!isOpen) return null;
+  React.useEffect(() => {
+    if (isOpen) {
+      setErrorMsg('');
+      setSuccessMsg('');
+    }
+  }, [isOpen]);
 
   async function handleAuth(e: React.FormEvent) {
     e.preventDefault();
@@ -28,136 +41,155 @@ export function AuthModal({ isOpen, onClose, onSuccess }: AuthModalProps) {
 
     try {
       if (isSignUp) {
-        const { data, error } = await supabase.auth.signUp({ email, password });
+        const { error } = await supabase.auth.signUp({ email, password });
         if (error) throw error;
-
-        // Show clean verification banner
         setSuccessMsg(
           'Account created! A confirmation link has been sent to your email. Please verify your email, then sign in.',
         );
       } else {
-        const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+        const { data, error } = await supabase.auth.signInWithPassword({
+          email,
+          password,
+        });
         if (error) throw error;
         if (data.user) {
-          onSuccess(data.user);
+          const user: User = {
+            id: (data.user as SupabaseAuthUser).id,
+            email: (data.user as SupabaseAuthUser).email ?? '',
+          };
+          onSuccess?.(user);
           onClose();
         }
       }
-    } catch (err: any) {
-      setErrorMsg(err.message || 'Authentication failed');
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Authentication failed';
+      setErrorMsg(message);
     } finally {
       setLoading(false);
     }
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-      <div onClick={onClose} className="fixed inset-0 bg-black/70 backdrop-blur-sm" />
-      <div className="relative z-10 w-full max-w-md rounded-2xl border border-zinc-800 bg-zinc-900 p-6 shadow-2xl">
-        <button
-          onClick={onClose}
-          className="absolute top-4 right-4 rounded-lg p-1.5 text-zinc-400 hover:bg-zinc-800 hover:text-white"
-        >
-          <X className="h-4 w-4" />
-        </button>
+    <Dialog
+      isOpen={isOpen}
+      onClose={onClose}
+      className="w-full max-w-md p-6"
+      closeOnBackdrop
+    >
+      <button
+        type="button"
+        onClick={onClose}
+        className="absolute top-4 right-4 p-1.5 text-fg-muted hover:text-fg rounded-lg hover:bg-surface-2 transition cursor-pointer"
+        aria-label="Close"
+      >
+        <X className="w-4 h-4" />
+      </button>
 
-        <div className="mb-2 flex items-center gap-2">
-          <div className="rounded-lg bg-indigo-600 p-2">
-            <Sparkles className="h-4 w-4 text-white" />
-          </div>
-          <h2 className="text-base font-bold text-white">
-            {isSignUp ? 'Create your Account' : 'Sign in to DocuMind'}
-          </h2>
+      <div className="flex items-center gap-2 mb-2">
+        <div className="p-2 bg-primary rounded-lg">
+          <Sparkles className="w-4 h-4 text-primary-fg" />
         </div>
-        <p className="mb-5 text-xs text-zinc-400">
-          {isSignUp
-            ? 'Sign up to sync your documents and chat history across all your devices.'
-            : 'Sign in to access your cloud documents from anywhere.'}
-        </p>
-
-        {successMsg ? (
-          <div className="space-y-3 rounded-xl border border-emerald-800/60 bg-emerald-950/40 p-4">
-            <div className="flex items-center gap-2 text-xs font-semibold text-emerald-300">
-              <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-400" />
-              <span>Verification Email Sent</span>
-            </div>
-            <p className="text-xs leading-relaxed text-zinc-300">{successMsg}</p>
-            <button
-              onClick={() => {
-                setIsSignUp(false);
-                setSuccessMsg('');
-              }}
-              className="w-full rounded-lg bg-emerald-600 py-2 text-xs font-semibold text-white transition hover:bg-emerald-500"
-            >
-              Go to Sign In
-            </button>
-          </div>
-        ) : (
-          <form onSubmit={handleAuth} className="space-y-3.5">
-            <div>
-              <label className="mb-1 block text-[11px] font-medium text-zinc-300">
-                Email Address
-              </label>
-              <div className="relative">
-                <Mail className="absolute top-3 left-3 h-4 w-4 text-zinc-500" />
-                <input
-                  type="email"
-                  required
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  placeholder="you@example.com"
-                  className="w-full rounded-xl border border-zinc-800 bg-zinc-950 py-2.5 pr-4 pl-9 text-xs text-white placeholder-zinc-500 focus:border-indigo-500 focus:outline-none"
-                />
-              </div>
-            </div>
-
-            <div>
-              <label className="mb-1 block text-[11px] font-medium text-zinc-300">Password</label>
-              <div className="relative">
-                <Lock className="absolute top-3 left-3 h-4 w-4 text-zinc-500" />
-                <input
-                  type="password"
-                  required
-                  minLength={6}
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  placeholder="••••••••"
-                  className="w-full rounded-xl border border-zinc-800 bg-zinc-950 py-2.5 pr-4 pl-9 text-xs text-white placeholder-zinc-500 focus:border-indigo-500 focus:outline-none"
-                />
-              </div>
-            </div>
-
-            {errorMsg && (
-              <p className="rounded-lg border border-red-800/50 bg-red-950/40 p-2.5 text-xs text-red-400">
-                {errorMsg}
-              </p>
-            )}
-
-            <button
-              type="submit"
-              disabled={loading}
-              className="flex w-full cursor-pointer items-center justify-center gap-2 rounded-xl bg-indigo-600 py-2.5 text-xs font-semibold text-white transition hover:bg-indigo-500 disabled:opacity-50"
-            >
-              {loading && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
-              {isSignUp ? 'Create Account' : 'Sign In'}
-            </button>
-          </form>
-        )}
-
-        {!successMsg && (
-          <div className="mt-4 text-center">
-            <button
-              onClick={() => {
-                setIsSignUp(!isSignUp);
-                setErrorMsg('');
-              }}
-              className="text-xs text-indigo-400 hover:underline"
-            >
-              {isSignUp ? 'Already have an account? Sign in' : "Don't have an account? Create one"}
-            </button>
-          </div>
-        )}
+        <h2 className="text-base font-bold text-fg">
+          {isSignUp ? 'Create your Account' : 'Sign in to DocuMind'}
+        </h2>
       </div>
-    </div>
+      <p className="text-xs text-fg-muted mb-5">
+        {isSignUp
+          ? 'Sign up to sync your documents and chat history across all your devices.'
+          : 'Sign in to access your cloud documents from anywhere.'}
+      </p>
+
+      {successMsg ? (
+        <div className="p-4 bg-success-soft border border-success/30 rounded-xl space-y-3">
+          <div className="flex items-center gap-2 text-xs font-semibold text-success">
+            <CheckCircle2 className="w-4 h-4 text-success shrink-0" />
+            <span>Verification Email Sent</span>
+          </div>
+          <p className="text-xs text-fg leading-relaxed">{successMsg}</p>
+          <button
+            type="button"
+            onClick={() => {
+              setIsSignUp(false);
+              setSuccessMsg('');
+            }}
+            className="w-full py-2 bg-success hover:bg-success/90 text-white rounded-lg text-xs font-semibold transition cursor-pointer"
+          >
+            Go to Sign In
+          </button>
+        </div>
+      ) : (
+        <form onSubmit={handleAuth} className="space-y-3.5">
+          <div>
+            <label className="text-[11px] font-medium text-fg mb-1 block">
+              Email Address
+            </label>
+            <div className="relative">
+              <Mail className="w-4 h-4 text-fg-subtle absolute left-3 top-3" />
+              <input
+                type="email"
+                required
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder="you@example.com"
+                className="w-full bg-bg border border-border rounded-xl pl-9 pr-4 py-2.5 text-xs text-fg placeholder-fg-subtle focus:outline-none focus:border-primary transition"
+              />
+            </div>
+          </div>
+
+          <div>
+            <label className="text-[11px] font-medium text-fg mb-1 block">
+              Password
+            </label>
+            <div className="relative">
+              <Lock className="w-4 h-4 text-fg-subtle absolute left-3 top-3" />
+              <input
+                type="password"
+                required
+                minLength={6}
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder="••••••••"
+                className="w-full bg-bg border border-border rounded-xl pl-9 pr-4 py-2.5 text-xs text-fg placeholder-fg-subtle focus:outline-none focus:border-primary transition"
+              />
+            </div>
+          </div>
+
+          {errorMsg && (
+            <p className="text-xs text-danger bg-danger-soft p-2.5 rounded-lg border border-danger/30">
+              {errorMsg}
+            </p>
+          )}
+
+          <button
+            type="submit"
+            disabled={loading}
+            className={cn(
+              'w-full py-2.5 bg-primary hover:bg-primary-hover text-primary-fg rounded-xl text-xs font-semibold',
+              'flex items-center justify-center gap-2 transition disabled:opacity-50 cursor-pointer',
+            )}
+          >
+            {loading && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+            {isSignUp ? 'Create Account' : 'Sign In'}
+          </button>
+        </form>
+      )}
+
+      {!successMsg && (
+        <div className="mt-4 text-center">
+          <button
+            type="button"
+            onClick={() => {
+              setIsSignUp(!isSignUp);
+              setErrorMsg('');
+            }}
+            className="text-xs text-primary hover:underline cursor-pointer"
+          >
+            {isSignUp
+              ? 'Already have an account? Sign in'
+              : "Don't have an account? Create one"}
+          </button>
+        </div>
+      )}
+    </Dialog>
   );
 }

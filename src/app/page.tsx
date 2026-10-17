@@ -4,6 +4,7 @@ import { AuthModal } from '@/components/auth/auth-modal';
 import { ChatInput } from '@/components/layout/chat-input';
 import { Header } from '@/components/layout/header';
 import { MessagesFeed } from '@/components/layout/messages-feed';
+import { MobileSidebar } from '@/components/layout/mobile-sidebar';
 import { Sidebar } from '@/components/layout/sidebar';
 import { CitationDrawer } from '@/components/chat/citation-drawer';
 import { PdfPreviewer } from '@/components/document/pdf-previewer';
@@ -23,7 +24,11 @@ export default function DocumentQAPage() {
 
   return (
     <div className="flex h-screen overflow-hidden bg-zinc-950 font-sans text-zinc-100 antialiased">
-      <Sidebar />
+      <div className="hidden md:flex">
+        <Sidebar />
+      </div>
+
+      <MobileSidebar />
 
       <main className="relative flex flex-1 flex-col bg-zinc-950">
         <Header onOpenPreview={() => setIsPreviewOpen(true)} />
@@ -37,11 +42,7 @@ export default function DocumentQAPage() {
         citation={selectedCitation}
       />
 
-      <AuthModal
-        isOpen={isAuthOpen}
-        onClose={closeAuth}
-        onSuccess={() => undefined}
-      />
+      <AuthModal isOpen={isAuthOpen} onClose={closeAuth} />
 
       <PdfPreviewer
         isOpen={isPreviewOpen}

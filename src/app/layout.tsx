@@ -4,6 +4,7 @@ import { Geist, Geist_Mono } from 'next/font/google';
 import { ToastProvider } from '@/providers/toast-provider';
 import { AuthProvider } from '@/providers/auth-provider';
 import { ChatProvider } from '@/providers/chat-provider';
+import { ThemeProvider } from '@/components/theme/theme-provider';
 import { Toaster } from '@/components/ui/toaster';
 import { APP_NAME, APP_TAGLINE } from '@/lib/constants';
 import './globals.css';
@@ -19,6 +20,19 @@ const geistMono = Geist_Mono({
   subsets: ['latin'],
   display: 'swap',
 });
+
+const themeInitScript = `(function() {
+  try {
+    var theme = window.localStorage.getItem('documind:theme');
+    if (theme === 'light') {
+      document.documentElement.classList.remove('dark');
+    } else {
+      document.documentElement.classList.add('dark');
+    }
+  } catch (e) {
+    document.documentElement.classList.add('dark');
+  }
+})();`;
 
 export const metadata: Metadata = {
   metadataBase: new URL('http://localhost:3000'),
@@ -71,17 +85,22 @@ export default function RootLayout({ children }: { children: ReactNode }) {
     <html
       lang="en"
       suppressHydrationWarning
-      className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
+      className={`${geistSans.variable} ${geistMono.variable} dark h-full antialiased`}
     >
+      <head>
+        <script dangerouslySetInnerHTML={{ __html: themeInitScript }} />
+      </head>
       <body className="bg-bg text-fg min-h-full font-sans">
-        <ToastProvider>
-          <AuthProvider>
-            <ChatProvider>
-              {children}
-              <Toaster />
-            </ChatProvider>
-          </AuthProvider>
-        </ToastProvider>
+        <ThemeProvider>
+          <ToastProvider>
+            <AuthProvider>
+              <ChatProvider>
+                {children}
+                <Toaster />
+              </ChatProvider>
+            </AuthProvider>
+          </ToastProvider>
+        </ThemeProvider>
       </body>
     </html>
   );

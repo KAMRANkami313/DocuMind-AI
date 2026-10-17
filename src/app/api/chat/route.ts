@@ -1,6 +1,6 @@
 import { type NextRequest, NextResponse } from 'next/server';
 import { generateEmbedding } from '@/lib/ai/embedding';
-import { supabaseAdmin, createClientForUser } from '@/lib/supabase/server';
+import { supabaseAdmin } from '@/lib/supabase/server';
 import { groq, buildSystemPrompt } from '@/lib/ai/groq';
 import { resolveSession } from '@/lib/auth/session';
 import { chatRequestSchema } from '@/lib/validation/schemas';
@@ -9,6 +9,7 @@ import { logger } from '@/lib/logger';
 import {
   AppError,
   badRequest,
+  forbidden,
   notFound,
   toAppError,
   appErrorToResponse,
@@ -20,6 +21,7 @@ export const maxDuration = 30;
 interface DocumentRow {
   id: string;
   title: string | null;
+  user_id: string | null;
 }
 
 interface ChunkRow {
@@ -71,19 +73,23 @@ export async function POST(req: NextRequest) {
     }
     const latestUserMessage = lastMessage.content.trim();
 
-    const queryClient = session.accessToken
-      ? createClientForUser(session.accessToken)
-      : supabaseAdmin;
+    const queryClient = supabaseAdmin;
 
     const { data: docData } = await queryClient
       .from('documents')
-      .select('id, title')
+      .select('id, title, user_id')
       .eq('id', documentId)
       .single<DocumentRow>();
 
     if (!docData) {
       throw notFound('Document not found or not accessible.');
     }
+
+    const expectedUserId = session.user?.id ?? null;
+    if (docData.user_id !== expectedUserId) {
+      throw forbidden('You do not have access to this document.');
+    }
+
     const docTitle = docData.title ?? 'Uploaded Document';
 
     let queryForSearch = latestUserMessage;
