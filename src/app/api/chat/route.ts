@@ -13,51 +13,109 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Messages are required.' }, { status: 400 });
     }
 
-    const latestUserMessage = messages[messages.length - 1].content;
+    const latestUserMessage = messages[messages.length - 1].content.trim();
 
-    // 1. Generate vector embedding for the incoming question
-    const queryVector = await generateEmbedding(latestUserMessage);
-
-    // 2. Query Supabase for top 4 most similar chunks using cosine distance
-    const { data: matchedChunks, error: matchError } = await supabaseAdmin.rpc('match_document_chunks', {
-      query_embedding: queryVector,
-      match_threshold: 0.35, // Balanced threshold for open-source embeddings
-      match_count: 4,
-      filter_document_id: documentId || null,
-    });
-
-    if (matchError) {
-      return NextResponse.json({ error: matchError.message }, { status: 500 });
+    // Contextual query rewriting for short conversational follow-ups
+    let queryForSearch = latestUserMessage;
+    if (latestUserMessage.split(' ').length <= 3 && messages.length >= 3) {
+      const prevUserMessage = messages[messages.length - 3]?.content || '';
+      queryForSearch = `${prevUserMessage} ${latestUserMessage}`;
     }
 
-    const context = (matchedChunks || []).map((chunk: any) => ({
-      content: chunk.content,
-      pageNumber: chunk.page_number,
-      similarity: chunk.similarity,
+    // 1. Fetch document metadata
+    let docTitle = 'Uploaded Document';
+    if (documentId) {
+      const { data: docData } = await supabaseAdmin
+        .from('documents')
+        .select('title')
+        .eq('id', documentId)
+        .single();
+      if (docData?.title) docTitle = docData.title;
+    }
+
+    let context: { content: string; pageNumber: number; similarity: number }[] = [];
+
+    if (documentId) {
+      // 2. Count total chunks for this document
+      const { count } = await supabaseAdmin
+        .from('document_chunks')
+        .select('*', { count: 'exact', head: true })
+        .eq('document_id', documentId);
+
+      const totalChunks = count || 0;
+
+      // 3. ZERO REGEX UNIVERSAL LOGIC:
+      // If document is <= 35 chunks (presentations, slide decks, short papers):
+      // Give the model the COMPLETE document so it can answer summaries, specific slides,
+      // and comparisons without missing any page!
+      if (totalChunks <= 35) {
+        const { data: allChunks } = await supabaseAdmin
+          .from('document_chunks')
+          .select('content, page_number')
+          .eq('document_id', documentId)
+          .order('page_number', { ascending: true });
+
+        if (allChunks) {
+          context = allChunks.map((c: any) => ({
+            content: c.content,
+            pageNumber: c.page_number,
+            similarity: 0.95,
+          }));
+        }
+      } else {
+        // For large documents (> 35 chunks): Hybrid Vector + Intro Pages
+        const queryVector = await generateEmbedding(queryForSearch);
+
+        const { data: matchedChunks } = await supabaseAdmin.rpc('match_document_chunks', {
+          query_embedding: queryVector,
+          match_threshold: 0.1,
+          match_count: 8,
+          filter_document_id: documentId,
+        });
+
+        const { data: introChunks } = await supabaseAdmin
+          .from('document_chunks')
+          .select('content, page_number')
+          .eq('document_id', documentId)
+          .order('page_number', { ascending: true })
+          .limit(3);
+
+        const combined = [...(matchedChunks || []), ...(introChunks || [])];
+        const unique = Array.from(new Map(combined.map((item: any) => [item.id || item.content, item])).values());
+
+        context = unique.map((c: any) => ({
+          content: c.content,
+          pageNumber: c.page_number || c.pageNumber,
+          similarity: c.similarity || 0.8,
+        }));
+      }
+    }
+
+    const systemPrompt = buildSystemPrompt(docTitle, context);
+
+    // 4. Safe conversational history truncation
+    const trimmedHistory = messages.slice(-3).map((m: any) => ({
+      role: m.role,
+      content: m.role === 'assistant' && m.content.length > 500 
+        ? m.content.slice(0, 500) + '... [Previous context shortened]'
+        : m.content,
     }));
 
-    // 3. Assemble prompt with strict citation context
-    const systemPrompt = buildSystemPrompt(context);
-
-    // 4. Create Groq streaming chat completion
+    // 5. Stream response from Groq
     const stream = await groq.chat.completions.create({
-      model: 'openai/gpt-oss-120b', // or llama-3.3-70b-versatile
+      model: 'openai/gpt-oss-120b',
       messages: [
         { role: 'system', content: systemPrompt },
-        ...messages.map((m: any) => ({
-          role: m.role,
-          content: m.content,
-        })),
+        ...trimmedHistory,
       ],
       stream: true,
-      temperature: 0.2, // Low temperature prevents hallucinations
+      temperature: 0.3,
+      max_tokens: 2000,
     });
 
-    // 5. Stream tokens back to client using Web Streams API
     const encoder = new TextEncoder();
     const readable = new ReadableStream({
       async start(controller) {
-        // Send citation metadata in the first custom event frame
         const metaEvent = `data: ${JSON.stringify({ citations: context })}\n\n`;
         controller.enqueue(encoder.encode(metaEvent));
 
@@ -81,6 +139,6 @@ export async function POST(req: NextRequest) {
       },
     });
   } catch (error: any) {
-    return NextResponse.json({ error: error.message || 'Error processing chat query.' }, { status: 500 });
+    return NextResponse.json({ error: error.message || 'Server error' }, { status: 500 });
   }
 }
