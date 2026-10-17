@@ -10,15 +10,14 @@ export const groq = new Groq({ apiKey });
 
 export function buildSystemPrompt(
   documentTitle: string,
-  contextChunks: { content: string; pageNumber: number }[]
+  contextChunks: { content: string; pageNumber: number }[],
 ): string {
   const sorted = [...contextChunks].sort((a, b) => a.pageNumber - b.pageNumber);
 
-  const formattedContext = sorted.length > 0
-    ? sorted
-        .map((c) => `[PAGE/SLIDE ${c.pageNumber}]:\n${c.content}`)
-        .join('\n\n')
-    : 'NO RELEVANT TEXT FOUND.';
+  const formattedContext =
+    sorted.length > 0
+      ? sorted.map((c) => `[PAGE/SLIDE ${c.pageNumber}]:\n${c.content}`).join('\n\n')
+      : 'NO RELEVANT TEXT FOUND.';
 
   return `You are a courteous, expert document intelligence assistant analyzing: "${documentTitle}".
 

@@ -1,4 +1,4 @@
-import { ExtractedPage } from './extractor';
+import { type ExtractedPage } from './extractor';
 
 export interface ChunkPayload {
   content: string;
@@ -13,13 +13,14 @@ export function splitTextIntoChunks(pages: ExtractedPage[]): ChunkPayload[] {
 
   for (const page of pages) {
     const cleanText = page.text.replace(/\s+/g, ' ').trim();
-    
+
     // Ignore completely empty pages (e.g. blank image-only slides)
     if (cleanText.length === 0) continue;
 
     // For short slides (titles, punchy lecture slides like "YES SIR!"), preserve as a whole chunk
     if (cleanText.length <= CHUNK_SIZE) {
-      if (cleanText.length >= 3) { // Captures any word with 3+ characters
+      if (cleanText.length >= 3) {
+        // Captures any word with 3+ characters
         chunks.push({
           content: cleanText,
           pageNumber: page.pageNumber,

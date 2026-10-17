@@ -2,7 +2,7 @@
 
 import React, { useEffect } from 'react';
 import { X, BookOpen, Layers } from 'lucide-react';
-import { Citation } from '@/types';
+import { type Citation } from '@/types';
 
 interface CitationDrawerProps {
   isOpen: boolean;
@@ -26,32 +26,32 @@ export function CitationDrawer({ isOpen, onClose, citation }: CitationDrawerProp
   return (
     <div className="fixed inset-0 z-50 flex justify-end">
       {/* Clickable Backdrop */}
-      <div 
+      <div
         onClick={onClose}
-        className="fixed inset-0 bg-black/60 backdrop-blur-sm transition-opacity cursor-pointer"
+        className="fixed inset-0 cursor-pointer bg-black/60 backdrop-blur-sm transition-opacity"
       />
 
       {/* Drawer */}
-      <div className="relative w-full max-w-md bg-zinc-900 border-l border-zinc-800 shadow-2xl p-6 z-10 flex flex-col justify-between overflow-y-auto animate-in slide-in-from-right duration-200">
+      <div className="animate-in slide-in-from-right relative z-10 flex w-full max-w-md flex-col justify-between overflow-y-auto border-l border-zinc-800 bg-zinc-900 p-6 shadow-2xl duration-200">
         <div>
-          <div className="flex items-center justify-between pb-4 border-b border-zinc-800">
-            <div className="flex items-center gap-2 text-zinc-100 font-semibold text-sm">
-              <BookOpen className="w-4 h-4 text-indigo-400" />
+          <div className="flex items-center justify-between border-b border-zinc-800 pb-4">
+            <div className="flex items-center gap-2 text-sm font-semibold text-zinc-100">
+              <BookOpen className="h-4 w-4 text-indigo-400" />
               Document Source Excerpt
             </div>
             <button
               onClick={onClose}
-              className="p-1.5 text-zinc-400 hover:text-white rounded-lg bg-zinc-800/80 hover:bg-zinc-700 transition"
+              className="rounded-lg bg-zinc-800/80 p-1.5 text-zinc-400 transition hover:bg-zinc-700 hover:text-white"
               title="Close drawer (Esc)"
             >
-              <X className="w-4 h-4" />
+              <X className="h-4 w-4" />
             </button>
           </div>
 
           <div className="mt-5 space-y-4">
             <div className="flex items-center justify-between">
-              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-md text-xs font-semibold bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
-                <Layers className="w-3.5 h-3.5" />
+              <span className="inline-flex items-center gap-1.5 rounded-md border border-indigo-500/30 bg-indigo-500/20 px-3 py-1 text-xs font-semibold text-indigo-300">
+                <Layers className="h-3.5 w-3.5" />
                 Page {citation.pageNumber}
               </span>
               <span className="text-xs text-zinc-400">
@@ -59,7 +59,7 @@ export function CitationDrawer({ isOpen, onClose, citation }: CitationDrawerProp
               </span>
             </div>
 
-            <div className="p-4 rounded-xl bg-zinc-950 border border-zinc-800 text-zinc-300 text-xs leading-relaxed whitespace-pre-wrap font-mono">
+            <div className="rounded-xl border border-zinc-800 bg-zinc-950 p-4 font-mono text-xs leading-relaxed whitespace-pre-wrap text-zinc-300">
               {citation.excerpt}
             </div>
           </div>
@@ -67,7 +67,7 @@ export function CitationDrawer({ isOpen, onClose, citation }: CitationDrawerProp
 
         <button
           onClick={onClose}
-          className="mt-6 w-full py-2.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-xs font-medium text-zinc-200 transition"
+          className="mt-6 w-full rounded-lg bg-zinc-800 py-2.5 text-xs font-medium text-zinc-200 transition hover:bg-zinc-700"
         >
           Close Preview
         </button>

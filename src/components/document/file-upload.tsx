@@ -67,7 +67,7 @@ export function FileUpload({ userId, onUploadSuccess }: FileUploadProps) {
           if (file) processFile(file);
         }}
         onClick={() => !isLoading && fileInputRef.current?.click()}
-        className={`border-2 border-dashed rounded-xl p-5 text-center cursor-pointer transition-all duration-200 ${
+        className={`cursor-pointer rounded-xl border-2 border-dashed p-5 text-center transition-all duration-200 ${
           isDragging
             ? 'border-indigo-500 bg-indigo-500/10'
             : 'border-zinc-800 bg-zinc-900/50 hover:border-zinc-700 hover:bg-zinc-900'
@@ -87,9 +87,9 @@ export function FileUpload({ userId, onUploadSuccess }: FileUploadProps) {
 
         <div className="flex flex-col items-center justify-center gap-2">
           {isLoading ? (
-            <Loader2 className="w-8 h-8 text-indigo-400 animate-spin" />
+            <Loader2 className="h-8 w-8 animate-spin text-indigo-400" />
           ) : (
-            <UploadCloud className="w-8 h-8 text-zinc-400 group-hover:text-indigo-400" />
+            <UploadCloud className="h-8 w-8 text-zinc-400 group-hover:text-indigo-400" />
           )}
           <div className="text-sm font-medium text-zinc-200">
             {isLoading ? 'Processing Ingestion' : 'Upload PDF Document'}
@@ -100,20 +100,20 @@ export function FileUpload({ userId, onUploadSuccess }: FileUploadProps) {
 
       {status && (
         <div
-          className={`mt-3 flex items-center gap-2 text-xs p-2.5 rounded-lg border ${
+          className={`mt-3 flex items-center gap-2 rounded-lg border p-2.5 text-xs ${
             status.startsWith('Error')
-              ? 'bg-red-950/40 border-red-800/60 text-red-300'
+              ? 'border-red-800/60 bg-red-950/40 text-red-300'
               : status.startsWith('Ready')
-              ? 'bg-emerald-950/40 border-emerald-800/60 text-emerald-300'
-              : 'bg-zinc-900 border-zinc-800 text-zinc-400'
+                ? 'border-emerald-800/60 bg-emerald-950/40 text-emerald-300'
+                : 'border-zinc-800 bg-zinc-900 text-zinc-400'
           }`}
         >
           {status.startsWith('Error') ? (
-            <AlertCircle className="w-4 h-4 shrink-0" />
+            <AlertCircle className="h-4 w-4 shrink-0" />
           ) : status.startsWith('Ready') ? (
-            <CheckCircle2 className="w-4 h-4 shrink-0" />
+            <CheckCircle2 className="h-4 w-4 shrink-0" />
           ) : (
-            <Loader2 className="w-4 h-4 shrink-0 animate-spin" />
+            <Loader2 className="h-4 w-4 shrink-0 animate-spin" />
           )}
           <span className="truncate">{status}</span>
         </div>

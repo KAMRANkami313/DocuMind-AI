@@ -1,14 +1,25 @@
 'use client';
 
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { Send, FileText, Sparkles, Check, Trash2, LogIn, LogOut, Eye, RotateCcw } from 'lucide-react';
+import {
+  Send,
+  FileText,
+  Sparkles,
+  Check,
+  Trash2,
+  LogIn,
+  LogOut,
+  Eye,
+  RotateCcw,
+} from 'lucide-react';
 import { supabase } from '@/lib/supabase/client';
 import { FileUpload } from '@/components/document/file-upload';
 import { CitationDrawer } from '@/components/chat/citation-drawer';
 import { MessageItem } from '@/components/chat/message-item';
 import { AuthModal } from '@/components/auth/auth-modal';
 import { PdfPreviewer } from '@/components/document/pdf-previewer';
-import { Citation } from '@/types';
+import { useToast } from '@/hooks/use-toast';
+import { type Citation } from '@/types';
 
 interface DocumentMeta {
   id: string;
@@ -35,6 +46,7 @@ export default function DocumentQAPage() {
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   const [isPreviewOpen, setIsPreviewOpen] = useState(false);
   const chatEndRef = useRef<HTMLDivElement>(null);
+  const { error: showError, success: showSuccess } = useToast();
 
   // 1. Check user auth
   useEffect(() => {
@@ -42,7 +54,9 @@ export default function DocumentQAPage() {
       setUser(currentUser);
     });
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, session) => {
       setUser(session?.user ?? null);
     });
 
@@ -63,7 +77,7 @@ export default function DocumentQAPage() {
         name: d.file_name || d.title,
       }));
       setDocuments(formatted);
-      setActiveDoc((prev) => (prev ? prev : formatted[0]));
+      setActiveDoc((prev) => (prev ? prev : (formatted[0] ?? null)));
     }
   }, []);
 
@@ -111,19 +125,23 @@ export default function DocumentQAPage() {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [chatSessions, activeDoc, isLoading]);
 
-  const currentMessages: Message[] = (activeDoc && chatSessions[activeDoc.id]) || (activeDoc ? [
-    {
-      role: 'assistant',
-      content: `Loaded **${activeDoc.name}**. Ask any question, and I will answer with exact citations.`,
-    },
-  ] : [
-    {
-      role: 'assistant',
-      content: user 
-        ? 'Welcome back! Upload a PDF to start analyzing across all your devices.' 
-        : 'Welcome to DocuMind AI (Guest Mode). Upload any PDF to start chatting instantly without an account.',
-    },
-  ]);
+  const currentMessages: Message[] =
+    (activeDoc && chatSessions[activeDoc.id]) ||
+    (activeDoc
+      ? [
+          {
+            role: 'assistant',
+            content: `Loaded **${activeDoc.name}**. Ask any question, and I will answer with exact citations.`,
+          },
+        ]
+      : [
+          {
+            role: 'assistant',
+            content: user
+              ? 'Welcome back! Upload a PDF to start analyzing across all your devices.'
+              : 'Welcome to DocuMind AI (Guest Mode). Upload any PDF to start chatting instantly without an account.',
+          },
+        ]);
 
   function switchDocument(doc: DocumentMeta) {
     setActiveDoc(doc);
@@ -132,6 +150,7 @@ export default function DocumentQAPage() {
   async function deleteDocument(docId: string, e: React.MouseEvent) {
     e.stopPropagation();
 
+    const target = documents.find((d) => d.id === docId);
     const updatedDocs = documents.filter((d) => d.id !== docId);
     setDocuments(updatedDocs);
 
@@ -139,13 +158,15 @@ export default function DocumentQAPage() {
     delete updatedChats[docId];
     setChatSessions(updatedChats);
 
-    if (activeDoc?.id === docId) {
-      setActiveDoc(updatedDocs.length > 0 ? updatedDocs[0] : null);
-    }
+if (activeDoc?.id === docId) {
+  setActiveDoc(updatedDocs.length > 0 ? (updatedDocs[0] ?? null) : null);
+}
 
     if (user) {
       await supabase.from('documents').delete().eq('id', docId);
     }
+
+    showSuccess('Document deleted', target ? `"${target.name}" was removed.` : undefined);
   }
 
   async function clearActiveChat() {
@@ -164,6 +185,8 @@ export default function DocumentQAPage() {
     if (user) {
       await supabase.from('chat_messages').delete().eq('document_id', activeDoc.id);
     }
+
+    showSuccess('Chat cleared', `History for "${activeDoc.name}" was reset.`);
   }
 
   async function deleteSpecificMessage(index: number) {
@@ -198,7 +221,7 @@ export default function DocumentQAPage() {
     if (!input.trim() || isLoading) return;
 
     if (!activeDoc) {
-      alert('Please upload a PDF document first.');
+      showError('No document loaded', 'Upload a PDF to start chatting.');
       return;
     }
 
@@ -219,15 +242,20 @@ export default function DocumentQAPage() {
 
     setIsLoading(true);
 
-    // Save user message to cloud if logged in
+// Save user message to cloud if logged in
     if (user) {
       const lastUser = messagesToSend[messagesToSend.length - 1];
-      supabase.from('chat_messages').insert({
-        document_id: activeDoc.id,
-        user_id: user.id,
-        role: 'user',
-        content: lastUser.content,
-      }).then();
+      if (lastUser) {
+        supabase
+          .from('chat_messages')
+          .insert({
+            document_id: activeDoc.id,
+            user_id: user.id,
+            role: 'user',
+            content: lastUser.content,
+          })
+          .then();
+      }
     }
 
     try {
@@ -300,15 +328,19 @@ export default function DocumentQAPage() {
 
       // Save assistant response to cloud if logged in
       if (user && assistantText) {
-        supabase.from('chat_messages').insert({
-          document_id: activeDoc.id,
-          user_id: user.id,
-          role: 'assistant',
-          content: assistantText,
-          citations: retrievedCitations,
-        }).then();
+        supabase
+          .from('chat_messages')
+          .insert({
+            document_id: activeDoc.id,
+            user_id: user.id,
+            role: 'assistant',
+            content: assistantText,
+            citations: retrievedCitations,
+          })
+          .then();
       }
     } catch (err: any) {
+      showError('Failed to fetch response', err?.message ?? 'Unknown server error.');
       setChatSessions((prev) => ({
         ...prev,
         [activeDoc.id]: [
@@ -322,14 +354,14 @@ export default function DocumentQAPage() {
   }
 
   return (
-    <div className="flex h-screen bg-zinc-950 text-zinc-100 font-sans antialiased overflow-hidden">
+    <div className="flex h-screen overflow-hidden bg-zinc-950 font-sans text-zinc-100 antialiased">
       {/* Sidebar */}
-      <aside className="w-80 border-r border-zinc-800 bg-zinc-900/60 p-5 flex flex-col justify-between shrink-0">
+      <aside className="flex w-80 shrink-0 flex-col justify-between border-r border-zinc-800 bg-zinc-900/60 p-5">
         <div className="space-y-6">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2.5">
-              <div className="p-2 bg-indigo-600 rounded-lg shadow-lg shadow-indigo-600/30">
-                <Sparkles className="w-5 h-5 text-white" />
+              <div className="rounded-lg bg-indigo-600 p-2 shadow-lg shadow-indigo-600/30">
+                <Sparkles className="h-5 w-5 text-white" />
               </div>
               <div>
                 <h1 className="text-sm font-bold tracking-tight text-white">DocuMind AI</h1>
@@ -343,30 +375,30 @@ export default function DocumentQAPage() {
               <button
                 onClick={() => supabase.auth.signOut()}
                 title="Sign out"
-                className="p-1.5 text-zinc-400 hover:text-white rounded-lg hover:bg-zinc-800 transition cursor-pointer"
+                className="cursor-pointer rounded-lg p-1.5 text-zinc-400 transition hover:bg-zinc-800 hover:text-white"
               >
-                <LogOut className="w-4 h-4" />
+                <LogOut className="h-4 w-4" />
               </button>
             ) : (
               <button
                 onClick={() => setIsAuthOpen(true)}
-                className="flex items-center gap-1.5 px-2.5 py-1 text-[11px] font-semibold bg-indigo-600/20 text-indigo-300 border border-indigo-500/30 rounded-lg hover:bg-indigo-600/30 transition cursor-pointer"
+                className="flex cursor-pointer items-center gap-1.5 rounded-lg border border-indigo-500/30 bg-indigo-600/20 px-2.5 py-1 text-[11px] font-semibold text-indigo-300 transition hover:bg-indigo-600/30"
               >
-                <LogIn className="w-3.5 h-3.5" />
+                <LogIn className="h-3.5 w-3.5" />
                 Sign In
               </button>
             )}
           </div>
 
           <div>
-            <div className="text-xs font-semibold uppercase tracking-wider text-zinc-400 mb-2.5 flex items-center justify-between">
+            <div className="mb-2.5 flex items-center justify-between text-xs font-semibold tracking-wider text-zinc-400 uppercase">
               <span>Your Documents</span>
               <span className="text-[10px] text-zinc-500">({documents.length})</span>
             </div>
 
-            <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
+            <div className="max-h-48 space-y-2 overflow-y-auto pr-1">
               {documents.length === 0 ? (
-                <div className="text-xs text-zinc-500 italic p-3 border border-dashed border-zinc-800 rounded-lg text-center">
+                <div className="rounded-lg border border-dashed border-zinc-800 p-3 text-center text-xs text-zinc-500 italic">
                   No documents in cloud yet.
                 </div>
               ) : (
@@ -376,24 +408,28 @@ export default function DocumentQAPage() {
                     <div
                       key={doc.id}
                       onClick={() => switchDocument(doc)}
-                      className={`group w-full flex items-center justify-between p-2.5 rounded-lg border text-xs transition cursor-pointer ${
+                      className={`group flex w-full cursor-pointer items-center justify-between rounded-lg border p-2.5 text-xs transition ${
                         isSelected
-                          ? 'bg-indigo-600/15 border-indigo-500/50 text-white font-medium'
-                          : 'bg-zinc-800/40 border-zinc-800 text-zinc-400 hover:border-zinc-700 hover:text-zinc-200'
+                          ? 'border-indigo-500/50 bg-indigo-600/15 font-medium text-white'
+                          : 'border-zinc-800 bg-zinc-800/40 text-zinc-400 hover:border-zinc-700 hover:text-zinc-200'
                       }`}
                     >
                       <div className="flex items-center gap-2 truncate">
-                        <FileText className={`w-4 h-4 shrink-0 ${isSelected ? 'text-indigo-400' : 'text-zinc-500'}`} />
+                        <FileText
+                          className={`h-4 w-4 shrink-0 ${isSelected ? 'text-indigo-400' : 'text-zinc-500'}`}
+                        />
                         <span className="truncate">{doc.name}</span>
                       </div>
                       <div className="flex items-center gap-1">
-                        {isSelected && <Check className="w-3.5 h-3.5 text-indigo-400 shrink-0 mr-1" />}
+                        {isSelected && (
+                          <Check className="mr-1 h-3.5 w-3.5 shrink-0 text-indigo-400" />
+                        )}
                         <button
                           onClick={(e) => deleteDocument(doc.id, e)}
                           title="Delete document"
-                          className="opacity-0 group-hover:opacity-100 p-1 hover:text-red-400 text-zinc-500 transition cursor-pointer"
+                          className="cursor-pointer p-1 text-zinc-500 opacity-0 transition group-hover:opacity-100 hover:text-red-400"
                         >
-                          <Trash2 className="w-3.5 h-3.5" />
+                          <Trash2 className="h-3.5 w-3.5" />
                         </button>
                       </div>
                     </div>
@@ -404,7 +440,7 @@ export default function DocumentQAPage() {
           </div>
 
           <div>
-            <div className="text-xs font-semibold uppercase tracking-wider text-zinc-400 mb-2">
+            <div className="mb-2 text-xs font-semibold tracking-wider text-zinc-400 uppercase">
               Upload PDF
             </div>
             <FileUpload
@@ -419,12 +455,12 @@ export default function DocumentQAPage() {
       </aside>
 
       {/* Main Chat Workspace */}
-      <main className="flex-1 flex flex-col bg-zinc-950 relative">
+      <main className="relative flex flex-1 flex-col bg-zinc-950">
         {/* Top Navbar */}
-        <header className="h-14 border-b border-zinc-800/80 px-6 flex items-center justify-between bg-zinc-900/20 backdrop-blur-sm">
+        <header className="flex h-14 items-center justify-between border-b border-zinc-800/80 bg-zinc-900/20 px-6 backdrop-blur-sm">
           <div className="flex items-center gap-2 text-xs">
             <span className="text-zinc-500">Active Document:</span>
-            <span className="font-medium text-zinc-200 bg-zinc-800/80 px-2.5 py-1 rounded-md border border-zinc-700/50">
+            <span className="rounded-md border border-zinc-700/50 bg-zinc-800/80 px-2.5 py-1 font-medium text-zinc-200">
               {activeDoc ? activeDoc.name : 'None selected'}
             </span>
           </div>
@@ -433,17 +469,17 @@ export default function DocumentQAPage() {
             <div className="flex items-center gap-2">
               <button
                 onClick={() => setIsPreviewOpen(true)}
-                className="flex items-center gap-1.5 px-3 py-1.5 text-xs text-zinc-300 hover:text-white bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 rounded-lg transition cursor-pointer"
+                className="flex cursor-pointer items-center gap-1.5 rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-1.5 text-xs text-zinc-300 transition hover:bg-zinc-800 hover:text-white"
               >
-                <Eye className="w-3.5 h-3.5 text-indigo-400" />
+                <Eye className="h-3.5 w-3.5 text-indigo-400" />
                 View Document
               </button>
               <button
                 onClick={clearActiveChat}
-                className="flex items-center gap-1.5 px-3 py-1.5 text-xs text-zinc-400 hover:text-red-300 bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 rounded-lg transition cursor-pointer"
+                className="flex cursor-pointer items-center gap-1.5 rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-1.5 text-xs text-zinc-400 transition hover:bg-zinc-800 hover:text-red-300"
                 title="Clear current chat"
               >
-                <RotateCcw className="w-3.5 h-3.5" />
+                <RotateCcw className="h-3.5 w-3.5" />
                 Clear Chat
               </button>
             </div>
@@ -451,7 +487,7 @@ export default function DocumentQAPage() {
         </header>
 
         {/* Messages Feed */}
-        <div className="flex-1 overflow-y-auto p-6 space-y-6">
+        <div className="flex-1 space-y-6 overflow-y-auto p-6">
           {currentMessages.map((msg, idx) => (
             <MessageItem
               key={idx}
@@ -465,7 +501,9 @@ export default function DocumentQAPage() {
               onSelectSuggestion={(suggestionText) => {
                 setInput(suggestionText);
                 setTimeout(() => {
-                  const btn = document.querySelector('form button[type="submit"]') as HTMLButtonElement;
+                  const btn = document.querySelector(
+                    'form button[type="submit"]',
+                  ) as HTMLButtonElement;
                   btn?.click();
                 }, 50);
               }}
@@ -477,22 +515,26 @@ export default function DocumentQAPage() {
         </div>
 
         {/* Input Bar */}
-        <div className="p-4 border-t border-zinc-800 bg-zinc-900/60 backdrop-blur-md">
-          <form onSubmit={handleSubmit} className="max-w-4xl mx-auto flex gap-2">
+        <div className="border-t border-zinc-800 bg-zinc-900/60 p-4 backdrop-blur-md">
+          <form onSubmit={handleSubmit} className="mx-auto flex max-w-4xl gap-2">
             <input
               type="text"
               value={input}
               onChange={(e) => setInput(e.target.value)}
-              placeholder={activeDoc ? `Ask anything about ${activeDoc.name}...` : 'Upload a PDF to start asking questions...'}
+              placeholder={
+                activeDoc
+                  ? `Ask anything about ${activeDoc.name}...`
+                  : 'Upload a PDF to start asking questions...'
+              }
               disabled={isLoading || !activeDoc}
-              className="flex-1 bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-3 text-sm text-zinc-200 placeholder-zinc-500 focus:outline-none focus:border-indigo-500 transition disabled:opacity-50"
+              className="flex-1 rounded-xl border border-zinc-800 bg-zinc-950 px-4 py-3 text-sm text-zinc-200 placeholder-zinc-500 transition focus:border-indigo-500 focus:outline-none disabled:opacity-50"
             />
             <button
               type="submit"
               disabled={isLoading || !input.trim() || !activeDoc}
-              className="px-5 py-3 rounded-xl bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-semibold flex items-center gap-2 transition cursor-pointer"
+              className="flex cursor-pointer items-center gap-2 rounded-xl bg-indigo-600 px-5 py-3 text-sm font-semibold text-white transition hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-50"
             >
-              <Send className="w-4 h-4" />
+              <Send className="h-4 w-4" />
             </button>
           </form>
         </div>

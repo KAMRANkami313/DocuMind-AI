@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { type NextRequest, NextResponse } from 'next/server';
 import { generateEmbedding } from '@/lib/ai/embedding';
 import { supabaseAdmin } from '@/lib/supabase/server';
 import { groq, buildSystemPrompt } from '@/lib/ai/groq';
@@ -81,7 +81,9 @@ export async function POST(req: NextRequest) {
           .limit(3);
 
         const combined = [...(matchedChunks || []), ...(introChunks || [])];
-        const unique = Array.from(new Map(combined.map((item: any) => [item.id || item.content, item])).values());
+        const unique = Array.from(
+          new Map(combined.map((item: any) => [item.id || item.content, item])).values(),
+        );
 
         context = unique.map((c: any) => ({
           content: c.content,
@@ -96,18 +98,16 @@ export async function POST(req: NextRequest) {
     // 4. Safe conversational history truncation
     const trimmedHistory = messages.slice(-3).map((m: any) => ({
       role: m.role,
-      content: m.role === 'assistant' && m.content.length > 500 
-        ? m.content.slice(0, 500) + '... [Previous context shortened]'
-        : m.content,
+      content:
+        m.role === 'assistant' && m.content.length > 500
+          ? m.content.slice(0, 500) + '... [Previous context shortened]'
+          : m.content,
     }));
 
     // 5. Stream response from Groq
     const stream = await groq.chat.completions.create({
       model: 'openai/gpt-oss-120b',
-      messages: [
-        { role: 'system', content: systemPrompt },
-        ...trimmedHistory,
-      ],
+      messages: [{ role: 'system', content: systemPrompt }, ...trimmedHistory],
       stream: true,
       temperature: 0.3,
       max_tokens: 2000,

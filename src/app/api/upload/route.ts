@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { type NextRequest, NextResponse } from 'next/server';
 import { extractPagesFromPdf } from '@/lib/pdf/extractor';
 import { splitTextIntoChunks } from '@/lib/pdf/chunker';
 import { generateEmbedding } from '@/lib/ai/embedding';
@@ -79,6 +79,9 @@ export async function POST(req: NextRequest) {
       totalChunks: chunksWithEmbeddings.length,
     });
   } catch (error: any) {
-    return NextResponse.json({ error: error.message || 'Server error processing PDF.' }, { status: 500 });
+    return NextResponse.json(
+      { error: error.message || 'Server error processing PDF.' },
+      { status: 500 },
+    );
   }
 }
