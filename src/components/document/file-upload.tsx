@@ -1,13 +1,14 @@
 'use client';
 
 import React, { useState, useRef } from 'react';
-import { UploadCloud, FileText, CheckCircle2, AlertCircle, Loader2 } from 'lucide-react';
+import { UploadCloud, CheckCircle2, AlertCircle, Loader2 } from 'lucide-react';
 
 interface FileUploadProps {
-  onUploadSuccess: (document: { id: string; name: string }) => void;
+  userId?: string;
+  onUploadSuccess: (document: { id: string; name: string; blobUrl?: string }) => void;
 }
 
-export function FileUpload({ onUploadSuccess }: FileUploadProps) {
+export function FileUpload({ userId, onUploadSuccess }: FileUploadProps) {
   const [isDragging, setIsDragging] = useState(false);
   const [status, setStatus] = useState<string>('');
   const [isLoading, setIsLoading] = useState(false);
@@ -24,6 +25,11 @@ export function FileUpload({ onUploadSuccess }: FileUploadProps) {
 
     const formData = new FormData();
     formData.append('file', file);
+    if (userId) {
+      formData.append('userId', userId);
+    }
+
+    const blobUrl = URL.createObjectURL(file);
 
     try {
       const res = await fetch('/api/upload', {
@@ -38,7 +44,7 @@ export function FileUpload({ onUploadSuccess }: FileUploadProps) {
       }
 
       setStatus(`Ready! Processed ${data.totalChunks} chunks.`);
-      onUploadSuccess({ id: data.documentId, name: data.fileName });
+      onUploadSuccess({ id: data.documentId, name: data.fileName, blobUrl });
     } catch (err: any) {
       setStatus(`Error: ${err.message}`);
     } finally {

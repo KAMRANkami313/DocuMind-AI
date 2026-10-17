@@ -4,12 +4,13 @@ import { splitTextIntoChunks } from '@/lib/pdf/chunker';
 import { generateEmbedding } from '@/lib/ai/embedding';
 import { supabaseAdmin } from '@/lib/supabase/server';
 
-export const maxDuration = 60; // Allows sufficient time for embedding generation
+export const maxDuration = 60;
 
 export async function POST(req: NextRequest) {
   try {
     const formData = await req.formData();
     const file = formData.get('file') as File | null;
+    const userId = formData.get('userId') as string | null;
 
     if (!file) {
       return NextResponse.json({ error: 'No file uploaded.' }, { status: 400 });
@@ -19,7 +20,6 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Only PDF documents are supported.' }, { status: 400 });
     }
 
-    // Limit to 10MB to maintain speed and avoid timeout
     if (file.size > 10 * 1024 * 1024) {
       return NextResponse.json({ error: 'File size must not exceed 10MB.' }, { status: 400 });
     }
@@ -36,12 +36,13 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Document contains no readable text.' }, { status: 400 });
     }
 
-    // 3. Create document record in Supabase
+    // 3. Create document record with user_id attached
     const { data: document, error: docError } = await supabaseAdmin
       .from('documents')
       .insert({
         title: file.name.replace(/\.[^/.]+$/, ''),
         file_name: file.name,
+        user_id: userId || null, // Associates with user in cloud
       })
       .select('id')
       .single();
@@ -62,7 +63,7 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    // 5. Bulk insert chunks with vectors into database
+    // 5. Bulk insert chunks
     const { error: chunkError } = await supabaseAdmin
       .from('document_chunks')
       .insert(chunksWithEmbeddings);

@@ -1,77 +1,196 @@
 'use client';
 
-import React, { useState, useRef, useEffect } from 'react';
-import { Send, FileText, Sparkles, Check } from 'lucide-react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
+import { Send, FileText, Sparkles, Check, Trash2, LogIn, LogOut, Eye, RotateCcw } from 'lucide-react';
+import { supabase } from '@/lib/supabase/client';
 import { FileUpload } from '@/components/document/file-upload';
 import { CitationDrawer } from '@/components/chat/citation-drawer';
 import { MessageItem } from '@/components/chat/message-item';
+import { AuthModal } from '@/components/auth/auth-modal';
+import { PdfPreviewer } from '@/components/document/pdf-previewer';
 import { Citation } from '@/types';
 
 interface DocumentMeta {
   id: string;
   name: string;
+  blobUrl?: string;
 }
 
 interface Message {
+  id?: string;
   role: 'user' | 'assistant';
   content: string;
   citations?: Citation[];
 }
 
-const DEFAULT_DOCUMENTS: DocumentMeta[] = [
-  { id: '31cdb084-9f77-4ebf-aecd-be8cf1293991', name: 'DL_Lab_02_Task.pdf' },
-];
-
 export default function DocumentQAPage() {
-  const [documents, setDocuments] = useState<DocumentMeta[]>(DEFAULT_DOCUMENTS);
-  const [activeDoc, setActiveDoc] = useState<DocumentMeta | null>(DEFAULT_DOCUMENTS[0]);
-  
-  // Persistent conversations mapped by document ID: { [docId]: Message[] }
+  const [user, setUser] = useState<any>(null);
+  const [isAuthOpen, setIsAuthOpen] = useState(false);
+  const [documents, setDocuments] = useState<DocumentMeta[]>([]);
+  const [activeDoc, setActiveDoc] = useState<DocumentMeta | null>(null);
   const [chatSessions, setChatSessions] = useState<Record<string, Message[]>>({});
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [selectedCitation, setSelectedCitation] = useState<Citation | null>(null);
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
+  const [isPreviewOpen, setIsPreviewOpen] = useState(false);
   const chatEndRef = useRef<HTMLDivElement>(null);
 
-  // Load chat histories from localStorage on initial render
+  // 1. Check user auth
   useEffect(() => {
-    try {
-      const savedChats = localStorage.getItem('documind_chat_sessions');
-      if (savedChats) {
-        setChatSessions(JSON.parse(savedChats));
-      }
-      const savedDocs = localStorage.getItem('documind_documents');
-      if (savedDocs) {
-        setDocuments(JSON.parse(savedDocs));
-      }
-    } catch {
-      // Ignore initial SSR parse
+    supabase.auth.getUser().then(({ data: { user: currentUser } }) => {
+      setUser(currentUser);
+    });
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      setUser(session?.user ?? null);
+    });
+
+    return () => subscription.unsubscribe();
+  }, []);
+
+  // 2. Fetch cloud documents for logged in user
+  const fetchCloudDocuments = useCallback(async (userId: string) => {
+    const { data: userDocs } = await supabase
+      .from('documents')
+      .select('id, title, file_name')
+      .eq('user_id', userId)
+      .order('created_at', { ascending: false });
+
+    if (userDocs && userDocs.length > 0) {
+      const formatted: DocumentMeta[] = userDocs.map((d: any) => ({
+        id: d.id,
+        name: d.file_name || d.title,
+      }));
+      setDocuments(formatted);
+      setActiveDoc((prev) => (prev ? prev : formatted[0]));
     }
   }, []);
 
-  // Save to localStorage whenever chat updates
+  // 3. Load cloud messages for active document
   useEffect(() => {
-    if (Object.keys(chatSessions).length > 0) {
-      localStorage.setItem('documind_chat_sessions', JSON.stringify(chatSessions));
+    async function loadCloudMessages() {
+      if (!user || !activeDoc) return;
+
+      const { data: cloudMessages } = await supabase
+        .from('chat_messages')
+        .select('id, role, content, citations')
+        .eq('document_id', activeDoc.id)
+        .order('created_at', { ascending: true });
+
+      if (cloudMessages && cloudMessages.length > 0) {
+        setChatSessions((prev) => ({
+          ...prev,
+          [activeDoc.id]: cloudMessages.map((m: any) => ({
+            id: m.id,
+            role: m.role,
+            content: m.content,
+            citations: m.citations || [],
+          })),
+        }));
+      }
     }
-  }, [chatSessions]);
+
+    if (user && activeDoc) {
+      loadCloudMessages();
+    }
+  }, [user, activeDoc]);
+
+  // Auth state change handler
+  useEffect(() => {
+    if (user) {
+      fetchCloudDocuments(user.id);
+    } else {
+      setDocuments([]);
+      setActiveDoc(null);
+      setChatSessions({});
+    }
+  }, [user, fetchCloudDocuments]);
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [chatSessions, activeDoc, isLoading]);
 
-  // Current active conversation
-  const currentMessages: Message[] = (activeDoc && chatSessions[activeDoc.id]) || [
+  const currentMessages: Message[] = (activeDoc && chatSessions[activeDoc.id]) || (activeDoc ? [
     {
       role: 'assistant',
-      content: `Hello! I have loaded **${activeDoc ? activeDoc.name : 'your document'}**. Ask any question, and I will answer with exact citations.`,
+      content: `Loaded **${activeDoc.name}**. Ask any question, and I will answer with exact citations.`,
     },
-  ];
+  ] : [
+    {
+      role: 'assistant',
+      content: user 
+        ? 'Welcome back! Upload a PDF to start analyzing across all your devices.' 
+        : 'Welcome to DocuMind AI (Guest Mode). Upload any PDF to start chatting instantly without an account.',
+    },
+  ]);
 
   function switchDocument(doc: DocumentMeta) {
-    if (activeDoc?.id === doc.id) return; // Ignore clicking the already-active document
     setActiveDoc(doc);
+  }
+
+  async function deleteDocument(docId: string, e: React.MouseEvent) {
+    e.stopPropagation();
+
+    const updatedDocs = documents.filter((d) => d.id !== docId);
+    setDocuments(updatedDocs);
+
+    const updatedChats = { ...chatSessions };
+    delete updatedChats[docId];
+    setChatSessions(updatedChats);
+
+    if (activeDoc?.id === docId) {
+      setActiveDoc(updatedDocs.length > 0 ? updatedDocs[0] : null);
+    }
+
+    if (user) {
+      await supabase.from('documents').delete().eq('id', docId);
+    }
+  }
+
+  async function clearActiveChat() {
+    if (!activeDoc) return;
+
+    setChatSessions((prev) => ({
+      ...prev,
+      [activeDoc.id]: [
+        {
+          role: 'assistant',
+          content: `Chat history cleared for **${activeDoc.name}**. Ask any question to start over.`,
+        },
+      ],
+    }));
+
+    if (user) {
+      await supabase.from('chat_messages').delete().eq('document_id', activeDoc.id);
+    }
+  }
+
+  async function deleteSpecificMessage(index: number) {
+    if (!activeDoc) return;
+    const currentList = chatSessions[activeDoc.id] || [];
+    const targetMsg = currentList[index];
+    const updated = currentList.filter((_, idx) => idx !== index);
+
+    setChatSessions((prev) => ({
+      ...prev,
+      [activeDoc.id]: updated,
+    }));
+
+    if (user && targetMsg?.id) {
+      await supabase.from('chat_messages').delete().eq('id', targetMsg.id);
+    }
+  }
+
+  async function handleInPlaceEdit(index: number, newText: string) {
+    if (!activeDoc || isLoading) return;
+
+    const currentList = chatSessions[activeDoc.id] || [];
+    const truncated = currentList.slice(0, index);
+    const editedUserMessage: Message = { role: 'user', content: newText };
+    const messagesToSend = [...truncated, editedUserMessage];
+
+    await sendChatRequest(messagesToSend);
   }
 
   async function handleSubmit(e: React.FormEvent) {
@@ -79,21 +198,37 @@ export default function DocumentQAPage() {
     if (!input.trim() || isLoading) return;
 
     if (!activeDoc) {
-      alert('Please select or upload a document first.');
+      alert('Please upload a PDF document first.');
       return;
     }
 
     const userMessage: Message = { role: 'user', content: input.trim() };
-    const updatedMessages = [...currentMessages, userMessage];
+    const messagesToSend = [...currentMessages, userMessage];
+    setInput('');
 
-    // Optimistically update conversation
+    await sendChatRequest(messagesToSend);
+  }
+
+  async function sendChatRequest(messagesToSend: Message[]) {
+    if (!activeDoc) return;
+
     setChatSessions((prev) => ({
       ...prev,
-      [activeDoc.id]: updatedMessages,
+      [activeDoc.id]: messagesToSend,
     }));
 
-    setInput('');
     setIsLoading(true);
+
+    // Save user message to cloud if logged in
+    if (user) {
+      const lastUser = messagesToSend[messagesToSend.length - 1];
+      supabase.from('chat_messages').insert({
+        document_id: activeDoc.id,
+        user_id: user.id,
+        role: 'user',
+        content: lastUser.content,
+      }).then();
+    }
 
     try {
       const response = await fetch('/api/chat', {
@@ -101,12 +236,12 @@ export default function DocumentQAPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           documentId: activeDoc.id,
-          messages: updatedMessages,
+          messages: messagesToSend,
         }),
       });
 
       if (!response.ok || !response.body) {
-        throw new Error('Failed to retrieve response from server');
+        throw new Error('Failed to retrieve response');
       }
 
       const reader = response.body.getReader();
@@ -114,10 +249,9 @@ export default function DocumentQAPage() {
       let assistantText = '';
       let retrievedCitations: Citation[] = [];
 
-      // Add temporary empty assistant message
       setChatSessions((prev) => ({
         ...prev,
-        [activeDoc.id]: [...updatedMessages, { role: 'assistant', content: '', citations: [] }],
+        [activeDoc.id]: [...messagesToSend, { role: 'assistant', content: '', citations: [] }],
       }));
 
       let buffer = '';
@@ -158,16 +292,27 @@ export default function DocumentQAPage() {
                 });
               }
             } catch {
-              // Ignore boundary chunks
+              // Ignore partial stream frames
             }
           }
         }
+      }
+
+      // Save assistant response to cloud if logged in
+      if (user && assistantText) {
+        supabase.from('chat_messages').insert({
+          document_id: activeDoc.id,
+          user_id: user.id,
+          role: 'assistant',
+          content: assistantText,
+          citations: retrievedCitations,
+        }).then();
       }
     } catch (err: any) {
       setChatSessions((prev) => ({
         ...prev,
         [activeDoc.id]: [
-          ...updatedMessages,
+          ...messagesToSend,
           { role: 'assistant', content: `Error: ${err.message}` },
         ],
       }));
@@ -181,55 +326,91 @@ export default function DocumentQAPage() {
       {/* Sidebar */}
       <aside className="w-80 border-r border-zinc-800 bg-zinc-900/60 p-5 flex flex-col justify-between shrink-0">
         <div className="space-y-6">
-          <div className="flex items-center gap-2.5">
-            <div className="p-2 bg-indigo-600 rounded-lg shadow-lg shadow-indigo-600/30">
-              <Sparkles className="w-5 h-5 text-white" />
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2.5">
+              <div className="p-2 bg-indigo-600 rounded-lg shadow-lg shadow-indigo-600/30">
+                <Sparkles className="w-5 h-5 text-white" />
+              </div>
+              <div>
+                <h1 className="text-sm font-bold tracking-tight text-white">DocuMind AI</h1>
+                <p className="text-[10px] text-zinc-400">
+                  {user ? 'Cloud Workspace (Synced)' : 'Guest Sandbox (Local)'}
+                </p>
+              </div>
             </div>
-            <div>
-              <h1 className="text-sm font-bold tracking-tight text-white">DocuMind AI</h1>
-              <p className="text-[11px] text-zinc-400">RAG Document Assistant</p>
-            </div>
+
+            {user ? (
+              <button
+                onClick={() => supabase.auth.signOut()}
+                title="Sign out"
+                className="p-1.5 text-zinc-400 hover:text-white rounded-lg hover:bg-zinc-800 transition cursor-pointer"
+              >
+                <LogOut className="w-4 h-4" />
+              </button>
+            ) : (
+              <button
+                onClick={() => setIsAuthOpen(true)}
+                className="flex items-center gap-1.5 px-2.5 py-1 text-[11px] font-semibold bg-indigo-600/20 text-indigo-300 border border-indigo-500/30 rounded-lg hover:bg-indigo-600/30 transition cursor-pointer"
+              >
+                <LogIn className="w-3.5 h-3.5" />
+                Sign In
+              </button>
+            )}
           </div>
 
           <div>
-            <div className="text-xs font-semibold uppercase tracking-wider text-zinc-400 mb-2.5">
-              Available Documents
+            <div className="text-xs font-semibold uppercase tracking-wider text-zinc-400 mb-2.5 flex items-center justify-between">
+              <span>Your Documents</span>
+              <span className="text-[10px] text-zinc-500">({documents.length})</span>
             </div>
+
             <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
-              {documents.map((doc) => {
-                const isSelected = activeDoc?.id === doc.id;
-                return (
-                  <button
-                    key={doc.id}
-                    onClick={() => switchDocument(doc)}
-                    className={`w-full text-left flex items-center justify-between p-2.5 rounded-lg border text-xs transition cursor-pointer ${
-                      isSelected
-                        ? 'bg-indigo-600/15 border-indigo-500/50 text-white font-medium'
-                        : 'bg-zinc-800/40 border-zinc-800 text-zinc-400 hover:border-zinc-700 hover:text-zinc-200'
-                    }`}
-                  >
-                    <div className="flex items-center gap-2 truncate">
-                      <FileText className={`w-4 h-4 shrink-0 ${isSelected ? 'text-indigo-400' : 'text-zinc-500'}`} />
-                      <span className="truncate">{doc.name}</span>
+              {documents.length === 0 ? (
+                <div className="text-xs text-zinc-500 italic p-3 border border-dashed border-zinc-800 rounded-lg text-center">
+                  No documents in cloud yet.
+                </div>
+              ) : (
+                documents.map((doc) => {
+                  const isSelected = activeDoc?.id === doc.id;
+                  return (
+                    <div
+                      key={doc.id}
+                      onClick={() => switchDocument(doc)}
+                      className={`group w-full flex items-center justify-between p-2.5 rounded-lg border text-xs transition cursor-pointer ${
+                        isSelected
+                          ? 'bg-indigo-600/15 border-indigo-500/50 text-white font-medium'
+                          : 'bg-zinc-800/40 border-zinc-800 text-zinc-400 hover:border-zinc-700 hover:text-zinc-200'
+                      }`}
+                    >
+                      <div className="flex items-center gap-2 truncate">
+                        <FileText className={`w-4 h-4 shrink-0 ${isSelected ? 'text-indigo-400' : 'text-zinc-500'}`} />
+                        <span className="truncate">{doc.name}</span>
+                      </div>
+                      <div className="flex items-center gap-1">
+                        {isSelected && <Check className="w-3.5 h-3.5 text-indigo-400 shrink-0 mr-1" />}
+                        <button
+                          onClick={(e) => deleteDocument(doc.id, e)}
+                          title="Delete document"
+                          className="opacity-0 group-hover:opacity-100 p-1 hover:text-red-400 text-zinc-500 transition cursor-pointer"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
                     </div>
-                    {isSelected && <Check className="w-3.5 h-3.5 text-indigo-400 shrink-0" />}
-                  </button>
-                );
-              })}
+                  );
+                })
+              )}
             </div>
           </div>
 
           <div>
             <div className="text-xs font-semibold uppercase tracking-wider text-zinc-400 mb-2">
-              Upload Document
+              Upload PDF
             </div>
             <FileUpload
+              userId={user?.id}
               onUploadSuccess={(newDoc) => {
-                setDocuments((prev) => {
-                  const updated = [newDoc, ...prev.filter((d) => d.id !== newDoc.id)];
-                  localStorage.setItem('documind_documents', JSON.stringify(updated));
-                  return updated;
-                });
+                setDocuments((prev) => [newDoc, ...prev.filter((d) => d.id !== newDoc.id)]);
                 setActiveDoc(newDoc);
               }}
             />
@@ -247,11 +428,31 @@ export default function DocumentQAPage() {
               {activeDoc ? activeDoc.name : 'None selected'}
             </span>
           </div>
+
+          {activeDoc && (
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setIsPreviewOpen(true)}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-xs text-zinc-300 hover:text-white bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 rounded-lg transition cursor-pointer"
+              >
+                <Eye className="w-3.5 h-3.5 text-indigo-400" />
+                View Document
+              </button>
+              <button
+                onClick={clearActiveChat}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-xs text-zinc-400 hover:text-red-300 bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 rounded-lg transition cursor-pointer"
+                title="Clear current chat"
+              >
+                <RotateCcw className="w-3.5 h-3.5" />
+                Clear Chat
+              </button>
+            </div>
+          )}
         </header>
 
         {/* Messages Feed */}
         <div className="flex-1 overflow-y-auto p-6 space-y-6">
-{currentMessages.map((msg, idx) => (
+          {currentMessages.map((msg, idx) => (
             <MessageItem
               key={idx}
               role={msg.role}
@@ -263,14 +464,13 @@ export default function DocumentQAPage() {
               }}
               onSelectSuggestion={(suggestionText) => {
                 setInput(suggestionText);
-                // Automatically send the suggested query
-                const fakeEvent = { preventDefault: () => {} } as React.FormEvent;
-                // Wait next tick for state to settle then submit
                 setTimeout(() => {
                   const btn = document.querySelector('form button[type="submit"]') as HTMLButtonElement;
                   btn?.click();
                 }, 50);
               }}
+              onSaveEdit={(newText) => handleInPlaceEdit(idx, newText)}
+              onDeleteMessage={() => deleteSpecificMessage(idx)}
             />
           ))}
           <div ref={chatEndRef} />
@@ -283,13 +483,13 @@ export default function DocumentQAPage() {
               type="text"
               value={input}
               onChange={(e) => setInput(e.target.value)}
-              placeholder="Ask anything about the active document..."
-              disabled={isLoading}
-              className="flex-1 bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-3 text-sm text-zinc-200 placeholder-zinc-500 focus:outline-none focus:border-indigo-500 transition"
+              placeholder={activeDoc ? `Ask anything about ${activeDoc.name}...` : 'Upload a PDF to start asking questions...'}
+              disabled={isLoading || !activeDoc}
+              className="flex-1 bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-3 text-sm text-zinc-200 placeholder-zinc-500 focus:outline-none focus:border-indigo-500 transition disabled:opacity-50"
             />
             <button
               type="submit"
-              disabled={isLoading || !input.trim()}
+              disabled={isLoading || !input.trim() || !activeDoc}
               className="px-5 py-3 rounded-xl bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-semibold flex items-center gap-2 transition cursor-pointer"
             >
               <Send className="w-4 h-4" />
@@ -303,6 +503,21 @@ export default function DocumentQAPage() {
         isOpen={isDrawerOpen}
         onClose={() => setIsDrawerOpen(false)}
         citation={selectedCitation}
+      />
+
+      {/* Auth Modal */}
+      <AuthModal
+        isOpen={isAuthOpen}
+        onClose={() => setIsAuthOpen(false)}
+        onSuccess={(newUser) => setUser(newUser)}
+      />
+
+      {/* PDF Document Previewer Modal */}
+      <PdfPreviewer
+        isOpen={isPreviewOpen}
+        onClose={() => setIsPreviewOpen(false)}
+        fileName={activeDoc ? activeDoc.name : ''}
+        fileBlobUrl={activeDoc?.blobUrl}
       />
     </div>
   );
