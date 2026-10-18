@@ -4,7 +4,13 @@ import * as React from 'react';
 import { useAuthContext } from './auth-provider';
 import { useToastContext } from './toast-provider';
 import { supabase } from '@/lib/supabase/client';
-import { streamChat } from '@/lib/api-client';
+import {
+  streamChat,
+  insertChatMessage,
+  loadChatMessages,
+  deleteChatMessage,
+  clearChatMessages,
+} from '@/lib/api-client';
 import type {
   ChatMessage,
   ChatSessions,
@@ -44,13 +50,6 @@ interface DocumentRow {
   id: string;
   file_name: string | null;
   title: string | null;
-}
-
-interface ChatMessageRow {
-  id: string;
-  role: 'user' | 'assistant' | 'system';
-  content: string;
-  citations: Citation[] | null;
 }
 
 export function ChatProvider({ children }: { children: React.ReactNode }) {
@@ -100,22 +99,22 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
     let active = true;
     async function loadCloudMessages() {
       if (!user || !activeDoc) return;
-      const { data: cloudMessages } = await supabase
-        .from('chat_messages')
-        .select('id, role, content, citations')
-        .eq('document_id', activeDoc.id)
-        .order('created_at', { ascending: true });
-      if (!active || !cloudMessages || cloudMessages.length === 0) return;
-      const typed = cloudMessages as ChatMessageRow[];
-      setChatSessions((prev) => ({
-        ...prev,
-        [activeDoc.id]: typed.map((m) => ({
-          id: m.id,
-          role: m.role,
-          content: m.content,
-          citations: m.citations ?? [],
-        })),
-      }));
+      try {
+        const messages = await loadChatMessages(activeDoc.id);
+        if (!active || messages.length === 0) return;
+        setChatSessions((prev) => ({
+          ...prev,
+          [activeDoc.id]: messages.map((m) => ({
+            id: m.id,
+            role: m.role,
+            content: m.content,
+            citations: m.citations ?? [],
+          })),
+        }));
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'Failed to load chat';
+        showError('Could not load chat history', message);
+      }
     }
     if (user && activeDoc) {
       void loadCloudMessages();
@@ -123,7 +122,7 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
     return () => {
       active = false;
     };
-  }, [user, activeDoc]);
+  }, [user, activeDoc, showError]);
 
   const currentMessages = React.useMemo<ChatMessage[]>(() => {
     if (activeDoc) {
@@ -154,15 +153,17 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
       setChatSessions((prev) => ({ ...prev, [activeDocId]: messagesToSend }));
       setIsLoading(true);
 
-      if (user) {
-        const lastUser = messagesToSend[messagesToSend.length - 1];
-        if (lastUser) {
-          void supabase.from('chat_messages').insert({
-            document_id: activeDocId,
-            user_id: user.id,
+      const lastUser = messagesToSend[messagesToSend.length - 1];
+      if (user && lastUser) {
+        try {
+          await insertChatMessage({
+            documentId: activeDocId,
             role: 'user',
             content: lastUser.content,
           });
+        } catch (err) {
+          const message = err instanceof Error ? err.message : 'Unknown error';
+          showError('Failed to save your message', message);
         }
       }
 
@@ -202,13 +203,17 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
         });
 
         if (user && assistantText) {
-          void supabase.from('chat_messages').insert({
-            document_id: activeDocId,
-            user_id: user.id,
-            role: 'assistant',
-            content: assistantText,
-            citations: retrievedCitations,
-          });
+          try {
+            await insertChatMessage({
+              documentId: activeDocId,
+              role: 'assistant',
+              content: assistantText,
+              citations: retrievedCitations,
+            });
+          } catch (err) {
+            const message = err instanceof Error ? err.message : 'Unknown error';
+            showError('Failed to save assistant response', message);
+          }
         }
       } catch (err) {
         const message = err instanceof Error ? err.message : 'Unknown server error';
@@ -296,10 +301,15 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
       ],
     }));
     if (user) {
-      await supabase.from('chat_messages').delete().eq('document_id', docId);
+      try {
+        await clearChatMessages(docId);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'Unknown error';
+        showError('Failed to clear chat history', message);
+      }
     }
     showSuccess('Chat cleared', `History for "${docName}" was reset.`);
-  }, [activeDoc, user, showSuccess]);
+  }, [activeDoc, user, showSuccess, showError]);
 
   const deleteSpecificMessage = React.useCallback(
     async (index: number) => {
@@ -310,10 +320,15 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
       const updated = currentList.filter((_, idx) => idx !== index);
       setChatSessions((prev) => ({ ...prev, [docId]: updated }));
       if (user && targetMsg?.id) {
-        await supabase.from('chat_messages').delete().eq('id', targetMsg.id);
+        try {
+          await deleteChatMessage(docId, targetMsg.id);
+        } catch (err) {
+          const message = err instanceof Error ? err.message : 'Unknown error';
+          showError('Failed to delete message', message);
+        }
       }
     },
-    [activeDoc, chatSessions, user],
+    [activeDoc, chatSessions, user, showError],
   );
 
   const handleInPlaceEdit = React.useCallback(

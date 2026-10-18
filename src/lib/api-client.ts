@@ -108,3 +108,61 @@ export async function streamChat(args: StreamChatArgs): Promise<void> {
     }
   }
 }
+
+export interface InsertMessageArgs {
+  documentId: string;
+  role: 'user' | 'assistant' | 'system';
+  content: string;
+  citations?: Citation[];
+}
+
+export interface InsertMessageResponse {
+  id: string;
+}
+
+export async function insertChatMessage(
+  args: InsertMessageArgs,
+): Promise<InsertMessageResponse> {
+  const res = await fetch('/api/messages', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(args),
+  });
+  if (!res.ok) await parseError(res);
+  return (await res.json()) as InsertMessageResponse;
+}
+
+export interface LoadMessagesResponse {
+  messages: ChatMessage[];
+}
+
+export async function loadChatMessages(
+  documentId: string,
+): Promise<ChatMessage[]> {
+  const res = await fetch(
+    `/api/messages?documentId=${encodeURIComponent(documentId)}`,
+    { method: 'GET' },
+  );
+  if (!res.ok) await parseError(res);
+  const data = (await res.json()) as LoadMessagesResponse;
+  return data.messages;
+}
+
+export async function deleteChatMessage(
+  documentId: string,
+  messageId: string,
+): Promise<void> {
+  const res = await fetch(
+    `/api/messages?documentId=${encodeURIComponent(documentId)}&messageId=${encodeURIComponent(messageId)}`,
+    { method: 'DELETE' },
+  );
+  if (!res.ok) await parseError(res);
+}
+
+export async function clearChatMessages(documentId: string): Promise<void> {
+  const res = await fetch(
+    `/api/messages?documentId=${encodeURIComponent(documentId)}`,
+    { method: 'DELETE' },
+  );
+  if (!res.ok) await parseError(res);
+}
