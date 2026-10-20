@@ -1,21 +1,28 @@
-import { pipeline } from '@xenova/transformers';
+import { pipeline, type FeatureExtractionPipeline } from '@xenova/transformers';
+import { EMBEDDING } from '@/lib/constants';
 
-// Singleton instance to prevent loading the model multiple times in memory
-let embeddingPipeline: any = null;
+let embeddingPipeline: FeatureExtractionPipeline | null = null;
 
-async function getPipeline() {
+async function getPipeline(): Promise<FeatureExtractionPipeline> {
   if (!embeddingPipeline) {
-    embeddingPipeline = await pipeline('feature-extraction', 'Xenova/all-MiniLM-L6-v2');
+    embeddingPipeline = (await pipeline(
+      'feature-extraction',
+      EMBEDDING.model,
+    )) as FeatureExtractionPipeline;
   }
   return embeddingPipeline;
 }
 
+interface EmbeddingOutput {
+  data: Float32Array | Int32Array;
+}
+
 export async function generateEmbedding(text: string): Promise<number[]> {
   const pipe = await getPipeline();
-  const output = await pipe(text, {
+  const output = (await pipe(text, {
     pooling: 'mean',
     normalize: true,
-  });
+  })) as unknown as EmbeddingOutput;
 
-  return Array.from(output.data);
+  return Array.from(output.data).map((n) => Number(n));
 }

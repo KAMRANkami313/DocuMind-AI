@@ -166,3 +166,25 @@ export async function clearChatMessages(documentId: string): Promise<void> {
   );
   if (!res.ok) await parseError(res);
 }
+
+export interface DocumentPageContent {
+  pageNumber: number;
+  text: string;
+}
+
+export interface DocumentContentResponse {
+  id: string;
+  title: string;
+  fileName: string;
+  pages: DocumentPageContent[];
+}
+
+export async function loadDocumentContent(
+  documentId: string,
+): Promise<DocumentContentResponse> {
+  const res = await fetch(`/api/documents/${encodeURIComponent(documentId)}`, {
+    method: 'GET',
+  });
+  if (!res.ok) await parseError(res);
+  return (await res.json()) as DocumentContentResponse;
+}

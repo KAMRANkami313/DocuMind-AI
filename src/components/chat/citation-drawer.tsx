@@ -1,6 +1,6 @@
 'use client';
 
-import { BookOpen, Layers } from 'lucide-react';
+import { BookText } from 'lucide-react';
 import { Sheet, SheetHeader, SheetBody, SheetFooter } from '@/components/ui/sheet';
 import { Button } from '@/components/ui/button';
 import type { Citation } from '@/types';
@@ -17,7 +17,7 @@ export function CitationDrawer({ isOpen, onClose, citation }: CitationDrawerProp
       <SheetHeader
         title={
           <div className="flex items-center gap-2 text-fg font-semibold text-sm">
-            <BookOpen className="h-4 w-4 text-indigo-400" />
+            <BookText className="h-4 w-4 text-primary" />
             Document Source Excerpt
           </div>
         }
@@ -27,8 +27,7 @@ export function CitationDrawer({ isOpen, onClose, citation }: CitationDrawerProp
       {citation ? (
         <SheetBody className="space-y-4">
           <div className="flex items-center justify-between">
-            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-md text-xs font-semibold bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
-              <Layers className="h-3.5 w-3.5" />
+            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium bg-primary-soft text-primary border border-primary/20">
               Page {citation.pageNumber}
             </span>
             <span className="text-xs text-fg-muted">

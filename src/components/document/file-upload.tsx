@@ -109,8 +109,8 @@ export function FileUpload({ userId, onUploadSuccess }: FileUploadProps) {
         className={cn(
           'cursor-pointer rounded-xl border-2 border-dashed p-5 text-center transition-all duration-200',
           isDragging
-            ? 'border-indigo-500 bg-indigo-500/10'
-            : 'border-zinc-800 bg-zinc-900/50 hover:border-zinc-700 hover:bg-zinc-900',
+            ? 'border-primary bg-primary-soft'
+            : 'border-border bg-surface hover:bg-surface-2 hover:border-border-strong',
         )}
       >
         <input
@@ -124,14 +124,14 @@ export function FileUpload({ userId, onUploadSuccess }: FileUploadProps) {
 
         <div className="flex flex-col items-center justify-center gap-2">
           {isLoading ? (
-            <Loader2 className="h-8 w-8 animate-spin text-indigo-400" />
+            <Loader2 className="h-8 w-8 animate-spin text-primary" />
           ) : (
-            <UploadCloud className="h-8 w-8 text-zinc-400 group-hover:text-indigo-400" />
+            <UploadCloud className="h-8 w-8 text-fg-subtle group-hover:text-primary" />
           )}
-          <div className="text-sm font-medium text-zinc-200">
+          <div className="text-sm font-medium text-fg">
             {isLoading ? 'Processing Ingestion' : 'Upload PDF Document'}
           </div>
-          <p className="text-xs text-zinc-500">
+          <p className="text-xs text-fg-subtle">
             Drag &amp; drop or click to browse (Max 10MB)
           </p>
         </div>
@@ -142,10 +142,10 @@ export function FileUpload({ userId, onUploadSuccess }: FileUploadProps) {
           className={cn(
             'mt-3 flex items-center gap-2 rounded-lg border p-2.5 text-xs',
             isError
-              ? 'border-red-800/60 bg-red-950/40 text-red-300'
+              ? 'border-danger/30 bg-danger-soft text-danger'
               : isReady
-                ? 'border-emerald-800/60 bg-emerald-950/40 text-emerald-300'
-                : 'border-zinc-800 bg-zinc-900 text-zinc-400',
+                ? 'border-success/30 bg-success-soft text-success'
+                : 'border-border bg-surface text-fg-muted',
           )}
         >
           {isError ? (

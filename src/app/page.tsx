@@ -23,14 +23,14 @@ export default function DocumentQAPage() {
   } = useChat();
 
   return (
-    <div className="flex h-screen overflow-hidden bg-zinc-950 font-sans text-zinc-100 antialiased">
-      <div className="hidden md:flex">
+    <div className="flex h-screen overflow-hidden bg-bg font-sans text-fg antialiased">
+      <div className="hidden lg:flex">
         <Sidebar />
       </div>
 
       <MobileSidebar />
 
-      <main className="relative flex flex-1 flex-col bg-zinc-950">
+      <main className="relative flex flex-1 flex-col bg-bg">
         <Header onOpenPreview={() => setIsPreviewOpen(true)} />
         <MessagesFeed />
         <ChatInput />
@@ -47,6 +47,7 @@ export default function DocumentQAPage() {
       <PdfPreviewer
         isOpen={isPreviewOpen}
         onClose={() => setIsPreviewOpen(false)}
+        documentId={activeDoc?.id}
         fileName={activeDoc ? activeDoc.name : ''}
         fileBlobUrl={activeDoc?.blobUrl}
       />

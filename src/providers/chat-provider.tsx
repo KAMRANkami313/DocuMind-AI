@@ -24,6 +24,7 @@ interface ChatContextValue {
   chatSessions: ChatSessions;
   input: string;
   isLoading: boolean;
+  isStreaming: boolean;
   currentMessages: ChatMessage[];
   selectedCitation: Citation | null;
   isDrawerOpen: boolean;
@@ -41,6 +42,8 @@ interface ChatContextValue {
   handleInPlaceEdit: (index: number, newText: string) => Promise<void>;
   handleSendSuggestion: (suggestion: string) => Promise<void>;
   handleSubmit: () => Promise<void>;
+  handleRegenerate: () => Promise<void>;
+  stopGeneration: () => void;
   openCitation: (citation: Citation) => void;
 }
 
@@ -61,31 +64,45 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
   const [chatSessions, setChatSessions] = React.useState<ChatSessions>({});
   const [input, setInput] = React.useState('');
   const [isLoading, setIsLoading] = React.useState(false);
+  const [isStreaming, setIsStreaming] = React.useState(false);
   const [selectedCitation, setSelectedCitation] = React.useState<Citation | null>(null);
   const [isDrawerOpen, setIsDrawerOpen] = React.useState(false);
   const [isPreviewOpen, setIsPreviewOpen] = React.useState(false);
 
+  const abortControllerRef = React.useRef<AbortController | null>(null);
+  const loadedDocsRef = React.useRef<Set<string>>(new Set());
+  const loadedMessagesRef = React.useRef<Set<string>>(new Set());
+
+  const userId = user?.id;
+
   React.useEffect(() => {
     let active = true;
     async function loadCloudDocuments() {
-      if (!user) return;
+      if (!userId) return;
+      if (loadedDocsRef.current.has(userId)) return;
+      loadedDocsRef.current.add(userId);
+
       const { data: userDocs } = await supabase
         .from('documents')
         .select('id, title, file_name')
-        .eq('user_id', user.id)
+        .eq('user_id', userId)
         .order('created_at', { ascending: false });
-      if (!active || !userDocs || userDocs.length === 0) return;
-      const typed = userDocs as DocumentRow[];
-      const formatted: DocumentMeta[] = typed.map((d) => ({
+
+      if (!active) return;
+      if (!userDocs || userDocs.length === 0) return;
+
+      const formatted: DocumentMeta[] = (userDocs as DocumentRow[]).map((d) => ({
         id: d.id,
         name: d.file_name ?? d.title ?? 'Untitled',
       }));
       setDocuments(formatted);
       setActiveDoc((prev) => (prev ? prev : (formatted[0] ?? null)));
     }
-    if (user) {
+    if (userId) {
       void loadCloudDocuments();
     } else {
+      loadedDocsRef.current.clear();
+      loadedMessagesRef.current.clear();
       setDocuments([]);
       setActiveDoc(null);
       setChatSessions({});
@@ -93,12 +110,15 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
     return () => {
       active = false;
     };
-  }, [user]);
+  }, [userId]);
 
   React.useEffect(() => {
     let active = true;
     async function loadCloudMessages() {
-      if (!user || !activeDoc) return;
+      if (!userId || !activeDoc) return;
+      if (loadedMessagesRef.current.has(activeDoc.id)) return;
+      loadedMessagesRef.current.add(activeDoc.id);
+
       try {
         const messages = await loadChatMessages(activeDoc.id);
         if (!active || messages.length === 0) return;
@@ -112,17 +132,18 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
           })),
         }));
       } catch (err) {
+        loadedMessagesRef.current.delete(activeDoc.id);
         const message = err instanceof Error ? err.message : 'Failed to load chat';
         showError('Could not load chat history', message);
       }
     }
-    if (user && activeDoc) {
+    if (userId && activeDoc) {
       void loadCloudMessages();
     }
     return () => {
       active = false;
     };
-  }, [user, activeDoc, showError]);
+  }, [userId, activeDoc, showError]);
 
   const currentMessages = React.useMemo<ChatMessage[]>(() => {
     if (activeDoc) {
@@ -138,23 +159,27 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
     return [
       {
         role: 'assistant',
-        content: user
+        content: userId
           ? 'Welcome back! Upload a PDF to start analyzing across all your devices.'
           : 'Welcome to DocuMind AI (Guest Mode). Upload any PDF to start chatting instantly without an account.',
       },
     ];
-  }, [activeDoc, chatSessions, user]);
+  }, [activeDoc, chatSessions, userId]);
 
   const sendChatRequest = React.useCallback(
     async (messagesToSend: ChatMessage[]) => {
       if (!activeDoc) return;
       const activeDocId = activeDoc.id;
 
+      const abortController = new AbortController();
+      abortControllerRef.current = abortController;
+
       setChatSessions((prev) => ({ ...prev, [activeDocId]: messagesToSend }));
       setIsLoading(true);
+      setIsStreaming(true);
 
       const lastUser = messagesToSend[messagesToSend.length - 1];
-      if (user && lastUser) {
+      if (userId && lastUser) {
         try {
           await insertChatMessage({
             documentId: activeDocId,
@@ -182,6 +207,7 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
         await streamChat({
           documentId: activeDocId,
           messages: messagesToSend,
+          signal: abortController.signal,
           onCitations: (citations) => {
             retrievedCitations = citations;
           },
@@ -202,7 +228,7 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
           },
         });
 
-        if (user && assistantText) {
+        if (userId && assistantText) {
           try {
             await insertChatMessage({
               documentId: activeDocId,
@@ -216,21 +242,44 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
           }
         }
       } catch (err) {
-        const message = err instanceof Error ? err.message : 'Unknown server error';
-        showError('Failed to fetch response', message);
-        setChatSessions((prev) => ({
-          ...prev,
-          [activeDocId]: [
-            ...messagesToSend,
-            { role: 'assistant', content: `Error: ${message}` },
-          ],
-        }));
+        if (abortController.signal.aborted) {
+          if (userId && assistantText) {
+            try {
+              await insertChatMessage({
+                documentId: activeDocId,
+                role: 'assistant',
+                content: assistantText + '\n\n_⏹ Generation stopped_',
+                citations: retrievedCitations,
+              });
+            } catch {
+              // Best-effort save of partial response
+            }
+          }
+        } else {
+          const message = err instanceof Error ? err.message : 'Unknown server error';
+          showError('Failed to fetch response', message);
+          setChatSessions((prev) => ({
+            ...prev,
+            [activeDocId]: [
+              ...messagesToSend,
+              { role: 'assistant', content: `Error: ${message}` },
+            ],
+          }));
+        }
       } finally {
+        abortControllerRef.current = null;
         setIsLoading(false);
+        setIsStreaming(false);
       }
     },
-    [activeDoc, user, showError],
+    [activeDoc, userId, showError],
   );
+
+  const stopGeneration = React.useCallback(() => {
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+    }
+  }, []);
 
   const handleSubmit = React.useCallback(async () => {
     if (!input.trim() || isLoading) return;
@@ -254,12 +303,47 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
     [isLoading, activeDoc, currentMessages, sendChatRequest],
   );
 
+  const handleRegenerate = React.useCallback(async () => {
+    if (!activeDoc || isLoading) return;
+    const docId = activeDoc.id;
+    const session = chatSessions[docId] ?? [];
+    if (session.length < 2) return;
+
+    const lastAssistantIdx = session.length - 1;
+    const lastAssistant = session[lastAssistantIdx];
+    if (!lastAssistant || lastAssistant.role !== 'assistant') return;
+
+    let lastUserIdx = lastAssistantIdx - 1;
+    while (lastUserIdx >= 0 && session[lastUserIdx]?.role !== 'user') {
+      lastUserIdx -= 1;
+    }
+    if (lastUserIdx < 0) return;
+    const lastUser = session[lastUserIdx];
+    if (!lastUser) return;
+
+    const truncated = session.slice(0, lastUserIdx);
+    const messagesToSend = [...truncated, { role: 'user' as const, content: lastUser.content }];
+
+    if (lastAssistant.id) {
+      try {
+        await deleteChatMessage(docId, lastAssistant.id);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'Unknown error';
+        showError('Failed to regenerate', message);
+        return;
+      }
+    }
+
+    await sendChatRequest(messagesToSend);
+  }, [activeDoc, isLoading, chatSessions, sendChatRequest, showError]);
+
   const switchDocument = React.useCallback((doc: DocumentMeta) => {
     setActiveDoc(doc);
   }, []);
 
   const addDocument = React.useCallback((doc: DocumentMeta) => {
     setDocuments((prev) => [doc, ...prev.filter((d) => d.id !== doc.id)]);
+    loadedMessagesRef.current.add(doc.id);
     setActiveDoc(doc);
   }, []);
 
@@ -273,10 +357,11 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
         delete next[docId];
         return next;
       });
+      loadedMessagesRef.current.delete(docId);
       if (activeDoc?.id === docId) {
         setActiveDoc(updatedDocs.length > 0 ? (updatedDocs[0] ?? null) : null);
       }
-      if (user) {
+      if (userId) {
         await supabase.from('documents').delete().eq('id', docId);
       }
       showSuccess(
@@ -284,7 +369,7 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
         target ? `"${target.name}" was removed.` : undefined,
       );
     },
-    [documents, activeDoc, user, showSuccess],
+    [documents, activeDoc, userId, showSuccess],
   );
 
   const clearActiveChat = React.useCallback(async () => {
@@ -300,7 +385,7 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
         },
       ],
     }));
-    if (user) {
+    if (userId) {
       try {
         await clearChatMessages(docId);
       } catch (err) {
@@ -309,7 +394,7 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
       }
     }
     showSuccess('Chat cleared', `History for "${docName}" was reset.`);
-  }, [activeDoc, user, showSuccess, showError]);
+  }, [activeDoc, userId, showSuccess, showError]);
 
   const deleteSpecificMessage = React.useCallback(
     async (index: number) => {
@@ -319,7 +404,7 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
       const targetMsg = currentList[index];
       const updated = currentList.filter((_, idx) => idx !== index);
       setChatSessions((prev) => ({ ...prev, [docId]: updated }));
-      if (user && targetMsg?.id) {
+      if (userId && targetMsg?.id) {
         try {
           await deleteChatMessage(docId, targetMsg.id);
         } catch (err) {
@@ -328,7 +413,7 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
         }
       }
     },
-    [activeDoc, chatSessions, user, showError],
+    [activeDoc, chatSessions, userId, showError],
   );
 
   const handleInPlaceEdit = React.useCallback(
@@ -356,6 +441,7 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
       chatSessions,
       input,
       isLoading,
+      isStreaming,
       currentMessages,
       selectedCitation,
       isDrawerOpen,
@@ -373,6 +459,8 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
       handleInPlaceEdit,
       handleSendSuggestion,
       handleSubmit,
+      handleRegenerate,
+      stopGeneration,
       openCitation,
     }),
     [
@@ -381,6 +469,7 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
       chatSessions,
       input,
       isLoading,
+      isStreaming,
       currentMessages,
       selectedCitation,
       isDrawerOpen,
@@ -393,6 +482,8 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
       handleInPlaceEdit,
       handleSendSuggestion,
       handleSubmit,
+      handleRegenerate,
+      stopGeneration,
       openCitation,
     ],
   );

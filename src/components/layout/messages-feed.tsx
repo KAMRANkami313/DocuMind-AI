@@ -15,10 +15,12 @@ export function MessagesFeed({ onSelectSuggestion }: MessagesFeedProps) {
     currentMessages,
     activeDoc,
     isLoading,
+    isStreaming,
     openCitation,
     deleteSpecificMessage,
     handleInPlaceEdit,
     handleSendSuggestion,
+    handleRegenerate,
   } = useChat();
 
   const chatEndRef = React.useRef<HTMLDivElement>(null);
@@ -28,29 +30,36 @@ export function MessagesFeed({ onSelectSuggestion }: MessagesFeedProps) {
   }, [currentMessages, activeDoc, isLoading]);
 
   const messages = currentMessages as ChatMessage[];
-  const showEmptyState = messages.length === 1 && messages[0]?.role === 'assistant';
+  const showEmptyState = messages.length === 1 && messages[0]?.role === 'assistant' && !isLoading;
   const hasActiveDoc = activeDoc !== null;
   const handleSuggestion = onSelectSuggestion ?? handleSendSuggestion;
 
   return (
-    <div className="flex-1 space-y-6 overflow-y-auto p-6">
+    <div className="flex-1 space-y-6 overflow-y-auto p-4 sm:p-6">
       {showEmptyState ? (
         <EmptyState hasActiveDoc={hasActiveDoc} />
       ) : (
-        messages.map((msg, idx) => (
-          <MessageItem
-            key={msg.id ?? idx}
-            role={msg.role as 'user' | 'assistant'}
-            content={msg.content}
-            citations={msg.citations}
-            onSelectCitation={(cite: Citation) => openCitation(cite)}
-            onSelectSuggestion={handleSuggestion}
-            onSaveEdit={(newText: string) =>
-              void handleInPlaceEdit(idx, newText)
-            }
-            onDeleteMessage={() => void deleteSpecificMessage(idx)}
-          />
-        ))
+        messages.map((msg, idx) => {
+          const isLast = idx === messages.length - 1;
+          const isLastAssistant = isLast && msg.role === 'assistant';
+          return (
+            <MessageItem
+              key={msg.id ?? idx}
+              role={msg.role as 'user' | 'assistant'}
+              content={msg.content}
+              citations={msg.citations}
+              isStreaming={isLastAssistant && isStreaming}
+              onSelectCitation={(cite: Citation) => openCitation(cite)}
+              onSelectSuggestion={handleSuggestion}
+              onSaveEdit={(newText: string) =>
+                void handleInPlaceEdit(idx, newText)
+              }
+              onDeleteMessage={() => void deleteSpecificMessage(idx)}
+              onRegenerate={isLastAssistant ? () => void handleRegenerate() : undefined}
+              isLast={isLast}
+            />
+          );
+        })
       )}
       <div ref={chatEndRef} />
     </div>

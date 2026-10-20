@@ -86,8 +86,8 @@ export function AuthModal({ isOpen, onClose, onSuccess }: AuthModalProps) {
       </button>
 
       <div className="flex items-center gap-2 mb-2">
-        <div className="p-2 bg-primary rounded-lg">
-          <Sparkles className="w-4 h-4 text-primary-fg" />
+        <div className="p-2 rounded-lg bg-linear-to-br from-indigo-500 to-violet-600 shadow-md shadow-primary/20">
+          <Sparkles className="w-4 h-4 text-white" />
         </div>
         <h2 className="text-base font-bold text-fg">
           {isSignUp ? 'Create your Account' : 'Sign in to DocuMind'}
@@ -131,7 +131,7 @@ export function AuthModal({ isOpen, onClose, onSuccess }: AuthModalProps) {
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 placeholder="you@example.com"
-                className="w-full bg-bg border border-border rounded-xl pl-9 pr-4 py-2.5 text-xs text-fg placeholder-fg-subtle focus:outline-none focus:border-primary transition"
+                className="w-full bg-surface border border-border rounded-xl pl-9 pr-4 py-2.5 text-xs text-fg placeholder-fg-subtle focus:outline-none focus:border-primary transition"
               />
             </div>
           </div>
@@ -149,7 +149,7 @@ export function AuthModal({ isOpen, onClose, onSuccess }: AuthModalProps) {
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 placeholder="••••••••"
-                className="w-full bg-bg border border-border rounded-xl pl-9 pr-4 py-2.5 text-xs text-fg placeholder-fg-subtle focus:outline-none focus:border-primary transition"
+                className="w-full bg-surface border border-border rounded-xl pl-9 pr-4 py-2.5 text-xs text-fg placeholder-fg-subtle focus:outline-none focus:border-primary transition"
               />
             </div>
           </div>
@@ -164,8 +164,10 @@ export function AuthModal({ isOpen, onClose, onSuccess }: AuthModalProps) {
             type="submit"
             disabled={loading}
             className={cn(
-              'w-full py-2.5 bg-primary hover:bg-primary-hover text-primary-fg rounded-xl text-xs font-semibold',
+              'w-full py-2.5 rounded-xl text-xs font-semibold text-white',
+              'bg-linear-to-br from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500',
               'flex items-center justify-center gap-2 transition disabled:opacity-50 cursor-pointer',
+              'shadow-md shadow-primary/20',
             )}
           >
             {loading && <Loader2 className="w-3.5 h-3.5 animate-spin" />}

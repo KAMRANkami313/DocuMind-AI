@@ -1,8 +1,10 @@
 'use client';
 
-import { Eye, RotateCcw } from 'lucide-react';
+import { Eye, MoreVertical, RotateCcw } from 'lucide-react';
+import * as React from 'react';
 import { useChat } from '@/hooks/use-chat';
 import { ThemeToggle } from '@/components/theme/theme-toggle';
+import { cn } from '@/lib/utils';
 
 interface HeaderProps {
   onOpenPreview: () => void;
@@ -10,39 +12,92 @@ interface HeaderProps {
 
 export function Header({ onOpenPreview }: HeaderProps) {
   const { activeDoc, clearActiveChat } = useChat();
+  const [menuOpen, setMenuOpen] = React.useState(false);
+
+  const menuRef = React.useRef<HTMLDivElement>(null);
+  React.useEffect(() => {
+    function handleClick(e: MouseEvent) {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+        setMenuOpen(false);
+      }
+    }
+    if (menuOpen) {
+      document.addEventListener('mousedown', handleClick);
+      return () => document.removeEventListener('mousedown', handleClick);
+    }
+  }, [menuOpen]);
 
   return (
-    <header className="flex h-14 items-center justify-between border-b border-zinc-800/80 bg-zinc-900/20 px-6 backdrop-blur-sm">
-      <div className="flex items-center gap-2 text-xs">
-        <span className="text-zinc-500">Active Document:</span>
-        <span className="rounded-md border border-zinc-700/50 bg-zinc-800/80 px-2.5 py-1 font-medium text-zinc-200">
+    <header className="flex h-14 items-center justify-between border-b border-border bg-surface/60 px-4 backdrop-blur-sm sm:px-6">
+      <div className="flex items-center gap-2 text-xs min-w-0">
+        <span className="text-fg-subtle hidden sm:inline">Active Document:</span>
+        <span className="truncate max-w-35 sm:max-w-xs rounded-md border border-border bg-surface-2 px-2.5 py-1 font-medium text-fg">
           {activeDoc ? activeDoc.name : 'None selected'}
         </span>
       </div>
 
-      <div className="flex items-center gap-3">
+      <div className="flex items-center gap-2 sm:gap-3">
         {activeDoc && (
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={onOpenPreview}
-              className="flex cursor-pointer items-center gap-1.5 rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-1.5 text-xs text-zinc-300 transition hover:bg-zinc-800 hover:text-white"
-            >
-              <Eye className="h-3.5 w-3.5 text-indigo-400" />
-              View Document
-            </button>
-            <button
-              type="button"
-              onClick={() => void clearActiveChat()}
-              title="Clear current chat"
-              className="flex cursor-pointer items-center gap-1.5 rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-1.5 text-xs text-zinc-400 transition hover:bg-zinc-800 hover:text-red-300"
-            >
-              <RotateCcw className="h-3.5 w-3.5" />
-              Clear Chat
-            </button>
-          </div>
+          <>
+            <div className="hidden sm:flex items-center gap-2">
+              <button
+                type="button"
+                onClick={onOpenPreview}
+                className="flex cursor-pointer items-center gap-1.5 rounded-lg border border-border bg-surface px-3 py-1.5 text-xs text-fg-muted transition hover:bg-surface-2 hover:text-fg"
+              >
+                <Eye className="h-3.5 w-3.5 text-primary" />
+                View Document
+              </button>
+              <button
+                type="button"
+                onClick={() => void clearActiveChat()}
+                title="Clear current chat"
+                className="flex cursor-pointer items-center gap-1.5 rounded-lg border border-border bg-surface px-3 py-1.5 text-xs text-fg-muted transition hover:bg-surface-2 hover:text-danger"
+              >
+                <RotateCcw className="h-3.5 w-3.5" />
+                Clear
+              </button>
+            </div>
+
+            <div className="sm:hidden relative" ref={menuRef}>
+              <button
+                type="button"
+                onClick={() => setMenuOpen(!menuOpen)}
+                className="flex cursor-pointer items-center justify-center h-8 w-8 rounded-lg border border-border bg-surface text-fg-muted transition hover:bg-surface-2"
+                aria-label="More actions"
+              >
+                <MoreVertical className="h-4 w-4" />
+              </button>
+              {menuOpen && (
+                <div className="absolute right-0 top-10 z-50 w-44 rounded-lg border border-border bg-surface shadow-elevated py-1">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setMenuOpen(false);
+                      onOpenPreview();
+                    }}
+                    className="flex w-full cursor-pointer items-center gap-2 px-3 py-2 text-xs text-fg-muted hover:bg-surface-2 hover:text-fg"
+                  >
+                    <Eye className="h-3.5 w-3.5 text-primary" />
+                    View Document
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setMenuOpen(false);
+                      void clearActiveChat();
+                    }}
+                    className="flex w-full cursor-pointer items-center gap-2 px-3 py-2 text-xs text-fg-muted hover:bg-surface-2 hover:text-danger"
+                  >
+                    <RotateCcw className="h-3.5 w-3.5" />
+                    Clear Chat
+                  </button>
+                </div>
+              )}
+            </div>
+          </>
         )}
-        <div className="h-5 w-px bg-zinc-800" />
+        <div className={cn('h-5 w-px bg-border', !activeDoc && 'hidden sm:block')} />
         <ThemeToggle />
       </div>
     </header>
