@@ -1,5 +1,7 @@
-import { pipeline, type FeatureExtractionPipeline } from '@xenova/transformers';
+import { pipeline, type FeatureExtractionPipeline, env } from '@xenova/transformers';
 import { EMBEDDING } from '@/lib/constants';
+
+env.cacheDir = './.transformers-cache';
 
 let embeddingPipeline: FeatureExtractionPipeline | null = null;
 

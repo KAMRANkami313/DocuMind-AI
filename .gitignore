@@ -40,3 +40,6 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# transformers model cache (downloaded during build, not committed)
+.transformers-cache/

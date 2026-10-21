@@ -17,6 +17,10 @@ const nextConfig: NextConfig = {
   partialPrefetching: true,
   poweredByHeader: false,
   reactStrictMode: true,
+  outputFileTracingIncludes: {
+    '/api/upload': ['./.transformers-cache/**/*'],
+    '/api/chat': ['./.transformers-cache/**/*'],
+  },
   turbopack: {
     rules: {
       '*.css': {
