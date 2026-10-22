@@ -16,6 +16,10 @@
   --color-primary-hover: var(--primary-hover);
   --color-primary-fg: var(--primary-fg);
   --color-primary-soft: var(--primary-soft);
+  --color-citation-bg: var(--citation-bg);
+  --color-citation-fg: var(--citation-fg);
+  --color-user-bubble: var(--user-bubble);
+  --color-user-bubble-border: var(--user-bubble-border);
   --color-success: var(--success);
   --color-success-soft: var(--success-soft);
   --color-warning: var(--warning);
@@ -38,47 +42,63 @@
 }
 
 :root {
-  --bg: #fafafa;
+  /* LIGHT MODE (Glacier Ice & Marine Cyan) */
+  --bg: #f4f8fb;
   --surface: #ffffff;
-  --surface-2: #f4f4f5;
-  --surface-3: #e4e4e7;
-  --border: #e4e4e7;
-  --border-strong: #d4d4d8;
-  --fg: #09090b;
-  --fg-muted: #52525b;
-  --fg-subtle: #71717a;
-  --primary: #6366f1;
-  --primary-hover: #4f46e5;
+  --surface-2: #eaf1f6;
+  --surface-3: #dde8f0;
+  --border: #d8e3ec;
+  --border-strong: #b8cddc;
+  --fg: #0c1524;
+  --fg-muted: #475569;
+  --fg-subtle: #64748b;
+  --primary: #0284c7;
+  --primary-hover: #0369a1;
   --primary-fg: #ffffff;
-  --primary-soft: rgba(99, 102, 241, 0.08);
+  --primary-soft: rgba(2, 132, 199, 0.08);
+
+  /* Light Citation Pills & User Bubble */
+  --citation-bg: #e0f2fe;
+  --citation-fg: #0369a1;
+  --user-bubble: #eaf1f6;
+  --user-bubble-border: #d0dfea;
+
   --success: #059669;
   --success-soft: rgba(5, 150, 105, 0.08);
   --warning: #d97706;
   --warning-soft: rgba(217, 119, 6, 0.08);
-  --danger: #dc2626;
-  --danger-soft: rgba(220, 38, 38, 0.08);
+  --danger: #e11d48;
+  --danger-soft: rgba(225, 29, 72, 0.08);
 }
 
 .dark {
-  --bg: #09090b;
-  --surface: #0f0f12;
-  --surface-2: #18181b;
-  --surface-3: #27272a;
-  --border: #1f1f23;
-  --border-strong: #2a2a2e;
-  --fg: #fafafa;
-  --fg-muted: #a1a1aa;
-  --fg-subtle: #71717a;
-  --primary: #6366f1;
-  --primary-hover: #818cf8;
-  --primary-fg: #ffffff;
-  --primary-soft: rgba(99, 102, 241, 0.14);
-  --success: #34d399;
-  --success-soft: rgba(52, 211, 153, 0.12);
-  --warning: #fbbf24;
-  --warning-soft: rgba(251, 191, 36, 0.12);
-  --danger: #f87171;
-  --danger-soft: rgba(248, 113, 113, 0.12);
+  /* DARK MODE (Deep Space Navy & Electric Cyan) */
+  --bg: #06090e;
+  --surface: #0a101d;
+  --surface-2: #0f172a;
+  --surface-3: #162238;
+  --border: #162238;
+  --border-strong: #1e3252;
+  --fg: #f1f5f9;
+  --fg-muted: #94a3b8;
+  --fg-subtle: #64748b;
+  --primary: #06b6d4;
+  --primary-hover: #22d3ee;
+  --primary-fg: #041019;
+  --primary-soft: rgba(6, 182, 212, 0.12);
+
+  /* Dark Citation Pills & User Bubble */
+  --citation-bg: #092235;
+  --citation-fg: #38bdf8;
+  --user-bubble: #0f172a;
+  --user-bubble-border: #1a2a44;
+
+  --success: #10b981;
+  --success-soft: rgba(16, 185, 129, 0.12);
+  --warning: #f59e0b;
+  --warning-soft: rgba(245, 158, 11, 0.12);
+  --danger: #f43f5e;
+  --danger-soft: rgba(244, 63, 94, 0.12);
 }
 
 * {
@@ -106,8 +126,8 @@ body {
 }
 
 ::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
+  width: 7px;
+  height: 7px;
 }
 
 ::-webkit-scrollbar-track {
@@ -184,5 +204,35 @@ body {
   & h4 {
     margin-top: 1em;
     margin-bottom: 0.5em;
+  }
+
+  /* Clean tables matching your mockup */
+  & table {
+    width: 100%;
+    margin: 1em 0;
+    border-collapse: collapse;
+    font-size: 0.9em;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    overflow: hidden;
+  }
+
+  & th {
+    background: var(--surface-2);
+    color: var(--primary);
+    font-weight: 600;
+    padding: 8px 12px;
+    text-align: left;
+    border-bottom: 1px solid var(--border);
+  }
+
+  & td {
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--border);
+    color: var(--fg);
+  }
+
+  & tr:last-child td {
+    border-bottom: none;
   }
 }

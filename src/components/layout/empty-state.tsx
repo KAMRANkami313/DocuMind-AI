@@ -14,7 +14,7 @@ export function EmptyState({ hasActiveDoc }: EmptyStateProps) {
     <div className="flex flex-1 flex-col items-center justify-center px-6 text-center py-12">
       <div className="relative mb-6">
         <div className="absolute inset-0 rounded-full bg-primary/20 blur-3xl" />
-        <div className="relative flex h-20 w-20 items-center justify-center rounded-2xl bg-linear-to-br from-indigo-500/10 to-violet-600/10 border border-primary/20">
+        <div className="relative flex h-20 w-20 items-center justify-center rounded-2xl bg-primary-soft border border-primary/30">
           {hasActiveDoc ? (
             <FileText className="h-10 w-10 text-primary" />
           ) : (

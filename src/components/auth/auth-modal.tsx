@@ -86,9 +86,9 @@ export function AuthModal({ isOpen, onClose, onSuccess }: AuthModalProps) {
       </button>
 
       <div className="flex items-center gap-2 mb-2">
-        <div className="p-2 rounded-lg bg-linear-to-br from-indigo-500 to-violet-600 shadow-md shadow-primary/20">
-          <Sparkles className="w-4 h-4 text-white" />
-        </div>
+        <div className="p-2 rounded-lg border border-primary/30 bg-primary/10 text-primary">
+  <Sparkles className="w-4 h-4" />
+</div>
         <h2 className="text-base font-bold text-fg">
           {isSignUp ? 'Create your Account' : 'Sign in to DocuMind'}
         </h2>
@@ -160,16 +160,16 @@ export function AuthModal({ isOpen, onClose, onSuccess }: AuthModalProps) {
             </p>
           )}
 
-          <button
-            type="submit"
-            disabled={loading}
-            className={cn(
-              'w-full py-2.5 rounded-xl text-xs font-semibold text-white',
-              'bg-linear-to-br from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500',
-              'flex items-center justify-center gap-2 transition disabled:opacity-50 cursor-pointer',
-              'shadow-md shadow-primary/20',
-            )}
-          >
+<button
+  type="submit"
+  disabled={loading}
+  className={cn(
+    'w-full py-2.5 rounded-xl text-xs font-semibold transition disabled:opacity-50 cursor-pointer',
+    'bg-primary text-primary-fg hover:bg-primary-hover',
+    'flex items-center justify-center gap-2',
+    'shadow-md shadow-primary/25',
+  )}
+>
             {loading && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
             {isSignUp ? 'Create Account' : 'Sign In'}
           </button>

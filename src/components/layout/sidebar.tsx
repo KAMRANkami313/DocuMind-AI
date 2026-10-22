@@ -47,9 +47,9 @@ export function Sidebar({ className, onNavigate }: SidebarProps) {
     >
       <div className="flex items-center justify-between mb-6">
         <div className="flex items-center gap-2.5">
-          <div className="rounded-lg bg-linear-to-br from-indigo-500 to-violet-600 p-2 shadow-md shadow-primary/20">
-            <Sparkles className="h-5 w-5 text-white" />
-          </div>
+<div className="rounded-lg border border-primary/30 bg-primary/10 p-2 text-primary">
+  <Sparkles className="h-5 w-5" />
+</div>
           <div>
             <h1 className="text-sm font-bold tracking-tight text-fg">
               {APP_NAME}

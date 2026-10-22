@@ -1,0 +1,19 @@
+{
+  "name": "DocuMind AI",
+  "short_name": "DocuMind",
+  "description": "Chat with your PDF documents. Grounded answers with page-level citations.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#09090b",
+  "theme_color": "#09090b",
+  "orientation": "any",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ],
+  "categories": ["productivity", "education", "utilities"]
+}

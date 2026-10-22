@@ -113,18 +113,18 @@ export function MessageItem({
       )}
     >
       {!isUser && (
-        <div className="mt-1 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-linear-to-br from-indigo-500 to-violet-600 shadow-md shadow-primary/20">
-          <Bot className="h-4 w-4 text-white" />
-        </div>
+<div className="mt-1 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-primary/30 bg-primary/10 text-primary">
+  <Bot className="h-4 w-4" />
+</div>
       )}
 
       <div className="relative w-full max-w-2xl space-y-2 overflow-hidden">
         <div
           className={cn(
             'relative rounded-2xl p-4 text-sm leading-relaxed',
-            isUser
-              ? 'rounded-br-md bg-linear-to-br from-indigo-600 to-violet-600 text-white shadow-md shadow-primary/20'
-              : 'rounded-bl-md border border-border bg-surface text-fg',
+isUser
+  ? 'rounded-br-md border border-user-bubble-border bg-user-bubble text-fg shadow-xs'
+  : 'rounded-bl-md border border-border bg-surface text-fg',
           )}
         >
           {!isEditing && (
@@ -176,7 +176,7 @@ export function MessageItem({
                   <button
                     type="button"
                     onClick={handleSave}
-                    className="flex cursor-pointer items-center gap-1 rounded-md bg-white px-2.5 py-1 text-xs font-semibold text-indigo-700 hover:bg-white/90"
+                    className="flex cursor-pointer items-center gap-1 rounded-md bg-primary px-2.5 py-1 text-xs font-semibold text-primary-fg hover:opacity-90"
                   >
                     <Check className="h-3 w-3" /> Save & Re-run
                   </button>

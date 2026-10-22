@@ -1,25 +1,15 @@
 import type { Metadata, Viewport } from 'next';
 import type { ReactNode } from 'react';
-import { Geist, Geist_Mono } from 'next/font/google';
+import { GeistSans } from 'geist/font/sans';
+import { GeistMono } from 'geist/font/mono';
 import { ToastProvider } from '@/providers/toast-provider';
 import { AuthProvider } from '@/providers/auth-provider';
 import { ChatProvider } from '@/providers/chat-provider';
 import { ThemeProvider } from '@/components/theme/theme-provider';
+import { ServiceWorkerRegister } from '@/components/pwa/sw-register';
 import { Toaster } from '@/components/ui/toaster';
 import { APP_NAME, APP_TAGLINE } from '@/lib/constants';
 import './globals.css';
-
-const geistSans = Geist({
-  variable: '--font-geist-sans',
-  subsets: ['latin'],
-  display: 'swap',
-});
-
-const geistMono = Geist_Mono({
-  variable: '--font-geist-mono',
-  subsets: ['latin'],
-  display: 'swap',
-});
 
 const themeInitScript = `(function() {
   try {
@@ -53,6 +43,7 @@ export const metadata: Metadata = {
     'Groq',
   ],
   authors: [{ name: 'KAMRANkami313' }],
+  manifest: '/manifest.json',
   openGraph: {
     type: 'website',
     title: `${APP_NAME} — ${APP_TAGLINE}`,
@@ -68,11 +59,16 @@ export const metadata: Metadata = {
     index: true,
     follow: true,
   },
+  appleWebApp: {
+    capable: true,
+    title: APP_NAME,
+    statusBarStyle: 'black-translucent',
+  },
 };
 
 export const viewport: Viewport = {
   themeColor: [
-    { media: '(prefers-color-scheme: light)', color: '#ffffff' },
+    { media: '(prefers-color-scheme: light)', color: '#fafafa' },
     { media: '(prefers-color-scheme: dark)', color: '#09090b' },
   ],
   width: 'device-width',
@@ -85,7 +81,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
     <html
       lang="en"
       suppressHydrationWarning
-      className={`${geistSans.variable} ${geistMono.variable} dark h-full antialiased`}
+      className={`${GeistSans.variable} ${GeistMono.variable} dark h-full antialiased`}
     >
       <head>
         <script dangerouslySetInnerHTML={{ __html: themeInitScript }} />
@@ -97,6 +93,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
               <ChatProvider>
                 {children}
                 <Toaster />
+                <ServiceWorkerRegister />
               </ChatProvider>
             </AuthProvider>
           </ToastProvider>

@@ -16,13 +16,13 @@ export function InlineCitation({ citation, onClick, className }: InlineCitationP
     <button
       type="button"
       onClick={() => onClick(citation)}
-      className={cn(
-        'inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium',
-        'bg-primary-soft text-primary border border-primary/20',
-        'transition-all hover:bg-primary/15 hover:border-primary/30 hover:shadow-sm',
-        'cursor-pointer',
-        className,
-      )}
+className={cn(
+  'inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-[11px] font-medium',
+  'bg-citation-bg text-citation-fg border border-primary/30',
+  'transition-all hover:opacity-80 hover:border-primary/50 hover:shadow-sm',
+  'cursor-pointer',
+  className,
+)}
       title={`Page ${citation.pageNumber} • ${relevance}% match`}
     >
       <BookText className="h-3 w-3 shrink-0" />
