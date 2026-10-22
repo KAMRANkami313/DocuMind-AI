@@ -17,9 +17,22 @@ const nextConfig: NextConfig = {
   partialPrefetching: true,
   poweredByHeader: false,
   reactStrictMode: true,
+  serverExternalPackages: [
+    '@xenova/transformers',
+    'onnxruntime-node',
+    'sharp',
+  ],
   outputFileTracingIncludes: {
-    '/api/upload': ['./.transformers-cache/**/*'],
-    '/api/chat': ['./.transformers-cache/**/*'],
+    '/api/upload': [
+      './.transformers-cache/**/*',
+      './node_modules/onnxruntime-node/bin/**/*',
+      './node_modules/@xenova/transformers/**/*',
+    ],
+    '/api/chat': [
+      './.transformers-cache/**/*',
+      './node_modules/onnxruntime-node/bin/**/*',
+      './node_modules/@xenova/transformers/**/*',
+    ],
   },
   turbopack: {
     rules: {
