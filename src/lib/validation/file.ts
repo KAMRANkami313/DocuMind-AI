@@ -1,4 +1,6 @@
 const PDF_MAGIC_BYTES = [0x25, 0x50, 0x44, 0x46];
+const TEXT_MIME_TYPES = ['text/plain', 'text/markdown'];
+const TEXT_EXTENSIONS = /\.(txt|md)$/i;
 
 export function isPdfMime(mime: string): boolean {
   return mime === 'application/pdf';
@@ -12,6 +14,14 @@ export function hasPdfMagicBytes(buffer: ArrayBuffer): boolean {
   if (buffer.byteLength < 4) return false;
   const view = new Uint8Array(buffer.slice(0, 4));
   return PDF_MAGIC_BYTES.every((byte, i) => view[i] === byte);
+}
+
+export function isTextMime(mime: string): boolean {
+  return TEXT_MIME_TYPES.includes(mime);
+}
+
+export function isTextExtension(filename: string): boolean {
+  return TEXT_EXTENSIONS.test(filename);
 }
 
 export interface FileValidationResult {
@@ -33,4 +43,27 @@ export function validatePdfFile(
     return { ok: false, reason: 'File content does not have valid PDF magic bytes' };
   }
   return { ok: true };
+}
+
+export function validateTextFile(file: File): FileValidationResult {
+  if (!isTextMime(file.type)) {
+    return { ok: false, reason: 'MIME type is not text/plain or text/markdown' };
+  }
+  if (!isTextExtension(file.name)) {
+    return { ok: false, reason: 'File extension is not .txt or .md' };
+  }
+  return { ok: true };
+}
+
+export function validateUploadedFile(
+  file: File,
+  buffer: ArrayBuffer,
+): FileValidationResult {
+  if (isPdfMime(file.type) || isPdfExtension(file.name)) {
+    return validatePdfFile(file, buffer);
+  }
+  if (isTextMime(file.type) || isTextExtension(file.name)) {
+    return validateTextFile(file);
+  }
+  return { ok: false, reason: 'Only PDF, TXT, and MD files are supported' };
 }

@@ -92,3 +92,60 @@ export async function GET(
     });
   }
 }
+
+export async function PATCH(
+  req: NextRequest,
+  { params }: { params: Promise<{ id: string }> },
+) {
+  try {
+    const { id: documentId } = await params;
+    if (!documentId) {
+      throw badRequest('Document ID is required.');
+    }
+
+    const session = await resolveSession();
+    const expectedUserId = session.user?.id ?? null;
+
+    const { data: docData } = await supabaseAdmin
+      .from('documents')
+      .select('id, user_id')
+      .eq('id', documentId)
+      .single<{ id: string; user_id: string | null }>();
+
+    if (!docData) {
+      throw notFound('Document not found.');
+    }
+    if (docData.user_id !== expectedUserId) {
+      throw forbidden('You do not have access to this document.');
+    }
+
+    const body: unknown = await req.json();
+    const { title } = body as { title?: string };
+    if (!title || title.trim().length === 0) {
+      throw badRequest('Title is required.');
+    }
+
+    const { data: updated, error: updateError } = await supabaseAdmin
+      .from('documents')
+      .update({ title: title.trim() })
+      .eq('id', documentId)
+      .select('id, title')
+      .single<{ id: string; title: string }>();
+
+    if (updateError || !updated) {
+      logger.error('Failed to rename document', { error: updateError, documentId });
+      throw badRequest('Failed to rename document.');
+    }
+
+    return NextResponse.json({ id: updated.id, title: updated.title });
+  } catch (error) {
+    const appError = toAppError(error);
+    logger.error('PATCH /api/documents/[id] failed', {
+      error: appError.message,
+      code: appError.code,
+    });
+    return NextResponse.json(appErrorToResponse(appError), {
+      status: appError.statusCode,
+    });
+  }
+}

@@ -10,6 +10,7 @@ import {
   loadChatMessages,
   deleteChatMessage,
   clearChatMessages,
+  renameDocument as apiRenameDocument,
 } from '@/lib/api-client';
 import type {
   ChatMessage,
@@ -36,6 +37,7 @@ interface ChatContextValue {
   setSelectedCitation: React.Dispatch<React.SetStateAction<Citation | null>>;
   switchDocument: (doc: DocumentMeta) => void;
   addDocument: (doc: DocumentMeta) => void;
+  renameDocument: (docId: string, newName: string) => Promise<void>;
   deleteDocument: (docId: string) => Promise<void>;
   clearActiveChat: () => Promise<void>;
   deleteSpecificMessage: (index: number) => Promise<void>;
@@ -347,6 +349,24 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
     setActiveDoc(doc);
   }, []);
 
+  const renameDocument = React.useCallback(
+    async (docId: string, newName: string) => {
+      setDocuments((prev) =>
+        prev.map((d) => (d.id === docId ? { ...d, name: newName } : d)),
+      );
+      if (activeDoc?.id === docId) {
+        setActiveDoc((prev) => (prev ? { ...prev, name: newName } : prev));
+      }
+      try {
+        await apiRenameDocument(docId, newName);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'Unknown error';
+        showError('Failed to rename document', message);
+      }
+    },
+    [activeDoc, showError],
+  );
+
   const deleteDocument = React.useCallback(
     async (docId: string) => {
       const target = documents.find((d) => d.id === docId);
@@ -453,6 +473,7 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
       setSelectedCitation,
       switchDocument,
       addDocument,
+      renameDocument,
       deleteDocument,
       clearActiveChat,
       deleteSpecificMessage,
@@ -476,6 +497,7 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
       isPreviewOpen,
       switchDocument,
       addDocument,
+      renameDocument,
       deleteDocument,
       clearActiveChat,
       deleteSpecificMessage,

@@ -188,3 +188,15 @@ export async function loadDocumentContent(
   if (!res.ok) await parseError(res);
   return (await res.json()) as DocumentContentResponse;
 }
+
+export async function renameDocument(
+  documentId: string,
+  title: string,
+): Promise<void> {
+  const res = await fetch(`/api/documents/${encodeURIComponent(documentId)}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ title }),
+  });
+  if (!res.ok) await parseError(res);
+}

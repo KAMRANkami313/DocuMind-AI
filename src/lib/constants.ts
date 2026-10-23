@@ -10,8 +10,8 @@ export const STORAGE_KEYS = {
 
 export const UPLOAD_LIMITS = {
   maxFileSizeBytes: 10 * 1024 * 1024,
-  acceptedMimeTypes: ['application/pdf'] as readonly string[],
-  acceptedExtensions: ['.pdf'] as readonly string[],
+  acceptedMimeTypes: ['application/pdf', 'text/plain', 'text/markdown'] as readonly string[],
+  acceptedExtensions: ['.pdf', '.txt', '.md'] as readonly string[],
   maxChunksPerDocument: 1500,
 } as const;
 

@@ -1,10 +1,10 @@
 import { type NextRequest, NextResponse } from 'next/server';
-import { extractPagesFromPdf } from '@/lib/pdf/extractor';
+import { extractPagesFromPdf, type ExtractedPage } from '@/lib/pdf/extractor';
 import { splitTextIntoChunks } from '@/lib/pdf/chunker';
 import { generateEmbedding } from '@/lib/ai/embedding';
 import { supabaseAdmin } from '@/lib/supabase/server';
 import { resolveSession } from '@/lib/auth/session';
-import { validatePdfFile } from '@/lib/validation/file';
+import { validateUploadedFile, isTextExtension } from '@/lib/validation/file';
 import { rateLimit } from '@/lib/rate-limit';
 import { logger } from '@/lib/logger';
 import {
@@ -61,12 +61,19 @@ export async function POST(req: NextRequest) {
     }
 
     const arrayBuffer = await file.arrayBuffer();
-    const validation = validatePdfFile(file, arrayBuffer);
+    const validation = validateUploadedFile(file, arrayBuffer);
     if (!validation.ok) {
-      throw unsupportedMediaType(`Invalid PDF: ${validation.reason ?? 'unknown error'}`);
+      throw unsupportedMediaType(`Invalid file: ${validation.reason ?? 'unknown error'}`);
     }
 
-    const pages = await extractPagesFromPdf(arrayBuffer);
+    let pages: ExtractedPage[];
+    if (isTextExtension(file.name)) {
+      const text = new TextDecoder().decode(arrayBuffer);
+      pages = [{ pageNumber: 1, text: text.trim() }];
+    } else {
+      pages = await extractPagesFromPdf(arrayBuffer);
+    }
+
     const rawChunks: ChunkPayload[] = splitTextIntoChunks(pages);
     if (rawChunks.length === 0) {
       throw badRequest('Document contains no readable text.');

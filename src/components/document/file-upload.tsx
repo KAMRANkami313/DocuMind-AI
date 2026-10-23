@@ -29,8 +29,14 @@ export function FileUpload({ userId, onUploadSuccess }: FileUploadProps) {
   const fileInputRef = React.useRef<HTMLInputElement>(null);
 
   async function processFile(file: File) {
-    if (file.type !== 'application/pdf') {
-      setStatus('Error: Only PDF documents are allowed.');
+    const isPdf = file.type === 'application/pdf' || /\.pdf$/i.test(file.name);
+    const isText =
+      file.type === 'text/plain' ||
+      file.type === 'text/markdown' ||
+      /\.(txt|md)$/i.test(file.name);
+
+    if (!isPdf && !isText) {
+      setStatus('Error: Only PDF, TXT, and MD files are allowed.');
       return;
     }
 
@@ -116,7 +122,7 @@ export function FileUpload({ userId, onUploadSuccess }: FileUploadProps) {
         <input
           ref={fileInputRef}
           type="file"
-          accept="application/pdf"
+          accept=".pdf,.txt,.md,application/pdf,text/plain,text/markdown"
           disabled={isLoading}
           onChange={handleFileChange}
           className="hidden"
@@ -129,7 +135,7 @@ export function FileUpload({ userId, onUploadSuccess }: FileUploadProps) {
             <UploadCloud className="h-8 w-8 text-fg-subtle group-hover:text-primary" />
           )}
           <div className="text-sm font-medium text-fg">
-            {isLoading ? 'Processing Ingestion' : 'Upload PDF Document'}
+            {isLoading ? 'Processing Ingestion' : 'Upload Document'}
           </div>
           <p className="text-xs text-fg-subtle">
             Drag &amp; drop or click to browse (Max 10MB)
