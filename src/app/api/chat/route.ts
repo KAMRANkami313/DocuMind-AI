@@ -61,7 +61,7 @@ export async function POST(req: NextRequest) {
       throw badRequest('Invalid request body', parseResult.error.flatten());
     }
 
-    const { chatSessionId, messages } = parseResult.data;
+    const { chatSessionId, messages, documentIds } = parseResult.data;
     const lastMessage = messages[messages.length - 1];
     if (!lastMessage) {
       throw badRequest('At least one message is required.');
@@ -69,37 +69,55 @@ export async function POST(req: NextRequest) {
     const latestUserMessage = lastMessage.content.trim();
 
     const queryClient = supabaseAdmin;
-    const expectedUserId = session.user?.id ?? null;
+    const isGuest = !session.user;
 
-    const { data: sessData } = await queryClient
-      .from('chat_sessions')
-      .select('id, user_id, title')
-      .eq('id', chatSessionId)
-      .single<{ id: string; user_id: string | null; title: string }>();
+    let allDocIds: string[];
+    let docTitle: string;
 
-    if (!sessData) {
-      throw notFound('Chat session not found.');
+    if (isGuest) {
+      // Guest mode: the chat_sessions row does not exist in Postgres.
+      // Use the document IDs passed by the client directly.
+      if (!documentIds || documentIds.length === 0) {
+        throw badRequest('No documents attached to this chat. Please attach a document first.');
+      }
+      allDocIds = documentIds;
+      docTitle = allDocIds.length > 1
+        ? `Guest chat (${allDocIds.length} docs)`
+        : 'Guest chat';
+    } else {
+      // Authenticated: look up the session in the database and verify ownership.
+      const expectedUserId = session.user?.id ?? null;
+
+      const { data: sessData } = await queryClient
+        .from('chat_sessions')
+        .select('id, user_id, title')
+        .eq('id', chatSessionId)
+        .single<{ id: string; user_id: string | null; title: string }>();
+
+      if (!sessData) {
+        throw notFound('Chat session not found.');
+      }
+      if (sessData.user_id !== expectedUserId) {
+        throw forbidden('You do not have access to this chat session.');
+      }
+
+      const { data: sessionDocs } = await queryClient
+        .from('chat_session_documents')
+        .select('document_id')
+        .eq('chat_session_id', chatSessionId);
+
+      allDocIds = ((sessionDocs ?? []) as Array<{ document_id: string }>).map(
+        (d) => d.document_id,
+      );
+
+      if (allDocIds.length === 0) {
+        throw badRequest('No documents attached to this chat. Please attach a document first.');
+      }
+
+      docTitle = allDocIds.length > 1
+        ? `${sessData.title} (${allDocIds.length} docs)`
+        : sessData.title;
     }
-    if (sessData.user_id !== expectedUserId) {
-      throw forbidden('You do not have access to this chat session.');
-    }
-
-    const { data: sessionDocs } = await queryClient
-      .from('chat_session_documents')
-      .select('document_id')
-      .eq('chat_session_id', chatSessionId);
-
-    const allDocIds = ((sessionDocs ?? []) as Array<{ document_id: string }>).map(
-      (d) => d.document_id,
-    );
-
-    if (allDocIds.length === 0) {
-      throw badRequest('No documents attached to this chat. Please attach a document first.');
-    }
-
-    const docTitle = allDocIds.length > 1
-      ? `${sessData.title} (${allDocIds.length} docs)`
-      : sessData.title;
 
     let queryForSearch = latestUserMessage;
     if (latestUserMessage.split(' ').length <= 3 && messages.length >= 3) {

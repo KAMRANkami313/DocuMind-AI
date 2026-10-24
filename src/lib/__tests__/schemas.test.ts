@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { chatRequestSchema } from '@/lib/validation/schemas';
 
 const VALID_SESSION_ID = '550e8400-e29b-41d4-a716-446655440000';
+const GUEST_SESSION_ID = 'guest-session_abc123def456';
 
 describe('chatRequestSchema', () => {
   it('accepts valid request', () => {
@@ -16,6 +17,15 @@ describe('chatRequestSchema', () => {
     expect(result.success).toBe(true);
   });
 
+  it('accepts guest session IDs (non-UUID, prefixed)', () => {
+    const valid = {
+      chatSessionId: GUEST_SESSION_ID,
+      messages: [{ role: 'user', content: 'test' }],
+    };
+    const result = chatRequestSchema.safeParse(valid);
+    expect(result.success).toBe(true);
+  });
+
   it('rejects missing chatSessionId', () => {
     const invalid = {
       messages: [{ role: 'user', content: 'test' }],
@@ -24,9 +34,18 @@ describe('chatRequestSchema', () => {
     expect(result.success).toBe(false);
   });
 
-  it('rejects non-UUID chatSessionId', () => {
+  it('rejects empty chatSessionId', () => {
     const invalid = {
-      chatSessionId: 'not-a-uuid',
+      chatSessionId: '',
+      messages: [{ role: 'user', content: 'test' }],
+    };
+    const result = chatRequestSchema.safeParse(invalid);
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects chatSessionId exceeding 100 characters', () => {
+    const invalid = {
+      chatSessionId: 'x'.repeat(101),
       messages: [{ role: 'user', content: 'test' }],
     };
     const result = chatRequestSchema.safeParse(invalid);
@@ -107,6 +126,36 @@ describe('chatRequestSchema', () => {
     const invalid = {
       chatSessionId: VALID_SESSION_ID,
       messages,
+    };
+    const result = chatRequestSchema.safeParse(invalid);
+    expect(result.success).toBe(false);
+  });
+
+  it('accepts optional documentIds array (guest mode)', () => {
+    const valid = {
+      chatSessionId: GUEST_SESSION_ID,
+      messages: [{ role: 'user', content: 'test' }],
+      documentIds: [VALID_SESSION_ID, '123e4567-e89b-12d3-a456-426614174000'],
+    };
+    const result = chatRequestSchema.safeParse(valid);
+    expect(result.success).toBe(true);
+  });
+
+  it('rejects documentIds with non-UUID entries', () => {
+    const invalid = {
+      chatSessionId: GUEST_SESSION_ID,
+      messages: [{ role: 'user', content: 'test' }],
+      documentIds: ['not-a-uuid'],
+    };
+    const result = chatRequestSchema.safeParse(invalid);
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects more than 3 documentIds', () => {
+    const invalid = {
+      chatSessionId: GUEST_SESSION_ID,
+      messages: [{ role: 'user', content: 'test' }],
+      documentIds: [VALID_SESSION_ID, VALID_SESSION_ID, VALID_SESSION_ID, VALID_SESSION_ID],
     };
     const result = chatRequestSchema.safeParse(invalid);
     expect(result.success).toBe(false);

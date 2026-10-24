@@ -1,7 +1,21 @@
 'use client';
 
 import * as React from 'react';
-import { LogIn, LogOut, MessageSquare, MoreVertical, Pencil, Plus, Search, Sparkles, Trash2, X, PanelLeftClose, PanelLeft, ChevronDown } from 'lucide-react';
+import {
+  LogIn,
+  LogOut,
+  MessageSquare,
+  MoreVertical,
+  Pencil,
+  Plus,
+  Search,
+  Sparkles,
+  Trash2,
+  X,
+  PanelLeftClose,
+  PanelLeft,
+  ChevronDown,
+} from 'lucide-react';
 import { useAuth } from '@/hooks/use-auth';
 import { useChat } from '@/hooks/use-chat';
 import { APP_NAME } from '@/lib/constants';
@@ -120,12 +134,21 @@ export function Sidebar({ className, onNavigate, onToggleCollapse, isCollapsed }
         </div>
         <div className="flex items-center gap-1">
           {onToggleCollapse && (
-            <button onClick={onToggleCollapse} className="hidden lg:flex cursor-pointer rounded-lg p-1.5 text-fg-muted transition hover:bg-surface-2 hover:text-fg" aria-label="Toggle sidebar" title="Toggle sidebar">
+            <button
+              onClick={onToggleCollapse}
+              className="hidden cursor-pointer rounded-lg p-1.5 text-fg-muted transition hover:bg-surface-2 hover:text-fg lg:flex"
+              aria-label="Toggle sidebar"
+              title="Toggle sidebar"
+            >
               {isCollapsed ? <PanelLeft className="h-4 w-4" /> : <PanelLeftClose className="h-4 w-4" />}
             </button>
           )}
           {onNavigate && (
-            <button onClick={onNavigate} className="lg:hidden cursor-pointer rounded-lg p-1.5 text-fg-muted transition hover:bg-surface-2 hover:text-fg" aria-label="Close sidebar">
+            <button
+              onClick={onNavigate}
+              className="cursor-pointer rounded-lg p-1.5 text-fg-muted transition hover:bg-surface-2 hover:text-fg lg:hidden"
+              aria-label="Close sidebar"
+            >
               <X className="h-4 w-4" />
             </button>
           )}
@@ -167,33 +190,66 @@ export function Sidebar({ className, onNavigate, onToggleCollapse, isCollapsed }
               <div key={sess.id} className="relative">
                 <div
                   onClick={() => handleSelect(sess.id)}
-                  role="button" tabIndex={0}
-                  onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleSelect(sess.id); } }}
-                  className={cn('group flex cursor-pointer items-start gap-2 rounded-lg border p-2.5 text-xs transition',
-                    isActive ? 'border-primary/30 bg-primary-soft text-fg' : 'border-transparent text-fg-muted hover:bg-surface-2 hover:text-fg')}
+                  role="button"
+                  tabIndex={0}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      handleSelect(sess.id);
+                    }
+                  }}
+                  className={cn(
+                    'group flex cursor-pointer items-start gap-2 rounded-lg border p-2.5 text-xs transition',
+                    isActive
+                      ? 'border-primary/30 bg-primary-soft text-fg'
+                      : 'border-transparent text-fg-muted hover:bg-surface-2 hover:text-fg',
+                  )}
                 >
-                  <MessageSquare className={cn('mt-0.5 h-3.5 w-3.5 shrink-0', isActive ? 'text-primary' : 'text-fg-subtle')} />
+                  <MessageSquare
+                    className={cn(
+                      'mt-0.5 h-3.5 w-3.5 shrink-0',
+                      isActive ? 'text-primary' : 'text-fg-subtle',
+                    )}
+                  />
                   <div className="min-w-0 flex-1">
                     {isEditing ? (
                       <input
-                        ref={editRef} type="text" value={editTitle}
+                        ref={editRef}
+                        type="text"
+                        value={editTitle}
                         onChange={(e) => setEditTitle(e.target.value)}
-                        onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); handleSaveRename(sess.id); } else if (e.key === 'Escape') { e.preventDefault(); setEditingId(null); } }}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            e.preventDefault();
+                            handleSaveRename(sess.id);
+                          } else if (e.key === 'Escape') {
+                            e.preventDefault();
+                            setEditingId(null);
+                          }
+                        }}
                         onClick={(e) => e.stopPropagation()}
                         className="w-full rounded border border-primary bg-surface px-1.5 py-0.5 text-xs text-fg focus:outline-none"
                       />
                     ) : (
                       <>
                         <p className="truncate font-medium">{sess.title}</p>
-                        {sess.preview && <p className="truncate text-[10px] text-fg-subtle">{sess.preview}</p>}
-                        <p className="mt-0.5 text-[10px] text-fg-subtle">{formatRelativeTime(sess.updatedAt)}</p>
+                        {sess.preview && (
+                          <p className="truncate text-[10px] text-fg-subtle">{sess.preview}</p>
+                        )}
+                        <p className="mt-0.5 text-[10px] text-fg-subtle">
+                          {formatRelativeTime(sess.updatedAt)}
+                        </p>
                       </>
                     )}
                   </div>
                   {!isEditing && (
                     <button
-                      onClick={(e) => { e.stopPropagation(); setMenuSessionId(menuSessionId === sess.id ? null : sess.id); }}
-                      className="cursor-pointer rounded p-0.5 text-fg-subtle opacity-0 transition hover:text-fg group-hover:opacity-100"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setMenuSessionId(menuSessionId === sess.id ? null : sess.id);
+                      }}
+                      // Always visible on touch/mobile; hover-only on lg+ desktops.
+                      className="cursor-pointer rounded p-0.5 text-fg-subtle opacity-100 transition hover:text-fg lg:opacity-0 lg:group-hover:opacity-100"
                       aria-label="More options"
                     >
                       <MoreVertical className="h-3.5 w-3.5" />
@@ -201,11 +257,20 @@ export function Sidebar({ className, onNavigate, onToggleCollapse, isCollapsed }
                   )}
                 </div>
                 {menuSessionId === sess.id && (
-                  <div ref={menuRef} className="absolute right-2 top-10 z-50 w-32 rounded-lg border border-border bg-surface shadow-elevated py-1">
-                    <button onClick={(e) => handleStartRename(sess.id, sess.title, e)} className="flex w-full cursor-pointer items-center gap-2 px-3 py-1.5 text-xs text-fg-muted hover:bg-surface-2 hover:text-fg">
+                  <div
+                    ref={menuRef}
+                    className="absolute right-2 top-10 z-50 w-32 rounded-lg border border-border bg-surface py-1 shadow-elevated"
+                  >
+                    <button
+                      onClick={(e) => handleStartRename(sess.id, sess.title, e)}
+                      className="flex w-full cursor-pointer items-center gap-2 px-3 py-1.5 text-xs text-fg-muted hover:bg-surface-2 hover:text-fg"
+                    >
                       <Pencil className="h-3 w-3" /> Rename
                     </button>
-                    <button onClick={(e) => handleDelete(sess.id, e)} className="flex w-full cursor-pointer items-center gap-2 px-3 py-1.5 text-xs text-fg-muted hover:bg-surface-2 hover:text-danger">
+                    <button
+                      onClick={(e) => handleDelete(sess.id, e)}
+                      className="flex w-full cursor-pointer items-center gap-2 px-3 py-1.5 text-xs text-fg-muted hover:bg-surface-2 hover:text-danger"
+                    >
                       <Trash2 className="h-3 w-3" /> Delete
                     </button>
                   </div>
@@ -225,15 +290,23 @@ export function Sidebar({ className, onNavigate, onToggleCollapse, isCollapsed }
           <ChevronDown className={cn('h-3 w-3 transition-transform', showLibrary && 'rotate-180')} />
         </button>
         {showLibrary && (
-          <div className="space-y-1 max-h-32 overflow-y-auto">
+          <div className="max-h-32 space-y-1 overflow-y-auto">
             {documents.length === 0 ? (
-              <p className="text-[10px] text-fg-subtle italic p-2">No documents uploaded.</p>
+              <p className="p-2 text-[10px] text-fg-subtle italic">No documents uploaded.</p>
             ) : (
               documents.map((doc) => (
-                <div key={doc.id} className="group flex items-center justify-between rounded px-2 py-1 text-[10px] text-fg-muted hover:bg-surface-2">
+                <div
+                  key={doc.id}
+                  className="group flex items-center justify-between rounded px-2 py-1 text-[10px] text-fg-muted hover:bg-surface-2"
+                >
                   <span className="truncate">{doc.name}</span>
                   {activeSession && (
-                    <button onClick={(e) => handleAttach(doc, e)} className="cursor-pointer text-primary opacity-0 group-hover:opacity-100" title="Attach to current chat">
+                    <button
+                      onClick={(e) => handleAttach(doc, e)}
+                      // Always visible on touch/mobile; hover-only on lg+ desktops.
+                      className="cursor-pointer text-primary opacity-100 transition hover:text-primary/80 lg:opacity-0 lg:group-hover:opacity-100"
+                      title="Attach to current chat"
+                    >
                       <Plus className="h-3 w-3" />
                     </button>
                   )}
@@ -261,18 +334,24 @@ export function Sidebar({ className, onNavigate, onToggleCollapse, isCollapsed }
               <ChevronDown className="h-3 w-3 text-fg-subtle" />
             </button>
             {profileOpen && (
-              <div className="absolute bottom-12 left-0 right-0 z-50 rounded-lg border border-border bg-surface shadow-elevated py-1">
+              <div className="absolute bottom-12 left-0 right-0 z-50 rounded-lg border border-border bg-surface py-1 shadow-elevated">
                 <div className="px-3 py-1.5 text-[10px] text-fg-subtle">Signed in as</div>
-                <div className="px-3 pb-2 text-xs font-medium text-fg truncate">{user.email}</div>
+                <div className="truncate px-3 pb-2 text-xs font-medium text-fg">{user.email}</div>
                 <div className="border-t border-border" />
-                <button onClick={() => void signOut()} className="flex w-full cursor-pointer items-center gap-2 px-3 py-2 text-xs text-fg-muted hover:bg-surface-2 hover:text-danger">
+                <button
+                  onClick={() => void signOut()}
+                  className="flex w-full cursor-pointer items-center gap-2 px-3 py-2 text-xs text-fg-muted hover:bg-surface-2 hover:text-danger"
+                >
                   <LogOut className="h-3.5 w-3.5" /> Sign Out
                 </button>
               </div>
             )}
           </div>
         ) : (
-          <button onClick={openAuth} className="flex w-full cursor-pointer items-center gap-2 rounded-lg border border-primary/20 bg-primary-soft px-3 py-2 text-xs font-semibold text-primary transition hover:bg-primary/15">
+          <button
+            onClick={openAuth}
+            className="flex w-full cursor-pointer items-center gap-2 rounded-lg border border-primary/20 bg-primary-soft px-3 py-2 text-xs font-semibold text-primary transition hover:bg-primary/15"
+          >
             <LogIn className="h-3.5 w-3.5" /> Sign In
           </button>
         )}

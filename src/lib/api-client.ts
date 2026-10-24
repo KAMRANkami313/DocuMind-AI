@@ -52,6 +52,9 @@ export async function uploadDocument(args: UploadDocumentArgs): Promise<UploadRe
 export interface StreamChatArgs {
   chatSessionId: string;
   messages: ChatMessage[];
+  /** Guest-mode only: document IDs to retrieve context from when the
+   *  chat_sessions row doesn't exist in Postgres. */
+  documentIds?: string[];
   onCitations: (citations: Citation[]) => void;
   onText: (text: string) => void;
   signal?: AbortSignal;
@@ -64,6 +67,9 @@ export async function streamChat(args: StreamChatArgs): Promise<void> {
     body: JSON.stringify({
       chatSessionId: args.chatSessionId,
       messages: args.messages,
+      ...(args.documentIds && args.documentIds.length > 0
+        ? { documentIds: args.documentIds }
+        : {}),
     }),
     signal: args.signal,
   });

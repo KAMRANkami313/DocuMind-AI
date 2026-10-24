@@ -156,8 +156,14 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
       return;
     }
     if (!user) {
+      // Guest mode: create a local-only session (no DB row).
       const guestId = generateId('guest-session');
-      const newSess: ChatSession = { id: guestId, title: 'New Chat', createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
+      const newSess: ChatSession = {
+        id: guestId,
+        title: 'New Chat',
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
       setSessions((prev) => [newSess, ...prev]);
       setActiveSessionId(guestId);
       setMessages([]);
@@ -218,6 +224,7 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
     }
     if (attachedDocs.some((d) => d.documentId === documentId)) return;
     setAttachedDocs((prev) => [...prev, { documentId, documentName }]);
+    // Auto-derive session title from the first attached document
     if (attachedDocs.length === 0) {
       setSessions((prev) => prev.map((s) => (s.id === activeSessionId ? { ...s, title: documentName, updatedAt: new Date().toISOString() } : s)));
       if (user) {
@@ -250,6 +257,7 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
       }
       setAttachedDocs((prev) => [...prev, { documentId: result.documentId, documentName: result.fileName }]);
       setDocuments((prev) => [{ id: result.documentId, name: result.fileName }, ...prev.filter((d) => d.id !== result.documentId)]);
+      // Auto-derive session title from the first uploaded document
       if (attachedDocs.length === 0) {
         setSessions((prev) => prev.map((s) => (s.id === activeSessionId ? { ...s, title: result.fileName, updatedAt: new Date().toISOString() } : s)));
         if (user) {
@@ -295,6 +303,9 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
       await streamChat({
         chatSessionId: sessionId,
         messages: messagesToSend,
+        // Guest mode: the chat_sessions row doesn't exist in Postgres,
+        // so pass the attached document IDs explicitly for retrieval.
+        documentIds: !user ? attachedDocs.map((d) => d.documentId) : undefined,
         signal: abortController.signal,
         onCitations: (citations) => { retrievedCitations = citations; },
         onText: (text) => {
@@ -335,7 +346,7 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
       setIsLoading(false);
       setIsStreaming(false);
     }
-  }, [activeSessionId, user, showError]);
+  }, [activeSessionId, user, attachedDocs, showError]);
 
   const stopGeneration = React.useCallback(() => {
     if (abortControllerRef.current) abortControllerRef.current.abort();
