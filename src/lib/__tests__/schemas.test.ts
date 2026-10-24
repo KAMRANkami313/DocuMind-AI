@@ -1,10 +1,12 @@
 import { describe, it, expect } from 'vitest';
 import { chatRequestSchema } from '@/lib/validation/schemas';
 
+const VALID_SESSION_ID = '550e8400-e29b-41d4-a716-446655440000';
+
 describe('chatRequestSchema', () => {
   it('accepts valid request', () => {
     const valid = {
-      documentId: '550e8400-e29b-41d4-a716-446655440000',
+      chatSessionId: VALID_SESSION_ID,
       messages: [
         { role: 'user', content: 'What is CNN?' },
         { role: 'assistant', content: 'CNN stands for...' },
@@ -14,7 +16,7 @@ describe('chatRequestSchema', () => {
     expect(result.success).toBe(true);
   });
 
-  it('rejects missing documentId', () => {
+  it('rejects missing chatSessionId', () => {
     const invalid = {
       messages: [{ role: 'user', content: 'test' }],
     };
@@ -22,9 +24,9 @@ describe('chatRequestSchema', () => {
     expect(result.success).toBe(false);
   });
 
-  it('rejects non-UUID documentId', () => {
+  it('rejects non-UUID chatSessionId', () => {
     const invalid = {
-      documentId: 'not-a-uuid',
+      chatSessionId: 'not-a-uuid',
       messages: [{ role: 'user', content: 'test' }],
     };
     const result = chatRequestSchema.safeParse(invalid);
@@ -33,7 +35,7 @@ describe('chatRequestSchema', () => {
 
   it('rejects empty messages array', () => {
     const invalid = {
-      documentId: '550e8400-e29b-41d4-a716-446655440000',
+      chatSessionId: VALID_SESSION_ID,
       messages: [],
     };
     const result = chatRequestSchema.safeParse(invalid);
@@ -42,7 +44,7 @@ describe('chatRequestSchema', () => {
 
   it('rejects messages with empty content', () => {
     const invalid = {
-      documentId: '550e8400-e29b-41d4-a716-446655440000',
+      chatSessionId: VALID_SESSION_ID,
       messages: [{ role: 'user', content: '' }],
     };
     const result = chatRequestSchema.safeParse(invalid);
@@ -51,7 +53,7 @@ describe('chatRequestSchema', () => {
 
   it('rejects invalid role', () => {
     const invalid = {
-      documentId: '550e8400-e29b-41d4-a716-446655440000',
+      chatSessionId: VALID_SESSION_ID,
       messages: [{ role: 'admin', content: 'test' }],
     };
     const result = chatRequestSchema.safeParse(invalid);
@@ -60,7 +62,7 @@ describe('chatRequestSchema', () => {
 
   it('rejects content exceeding 10000 characters', () => {
     const invalid = {
-      documentId: '550e8400-e29b-41d4-a716-446655440000',
+      chatSessionId: VALID_SESSION_ID,
       messages: [{ role: 'user', content: 'x'.repeat(10001) }],
     };
     const result = chatRequestSchema.safeParse(invalid);
@@ -69,7 +71,7 @@ describe('chatRequestSchema', () => {
 
   it('accepts messages with optional citations', () => {
     const valid = {
-      documentId: '550e8400-e29b-41d4-a716-446655440000',
+      chatSessionId: VALID_SESSION_ID,
       messages: [
         {
           role: 'assistant',
@@ -90,7 +92,7 @@ describe('chatRequestSchema', () => {
       content: 'question',
     }));
     const valid = {
-      documentId: '550e8400-e29b-41d4-a716-446655440000',
+      chatSessionId: VALID_SESSION_ID,
       messages,
     };
     const result = chatRequestSchema.safeParse(valid);
@@ -103,7 +105,7 @@ describe('chatRequestSchema', () => {
       content: 'question',
     }));
     const invalid = {
-      documentId: '550e8400-e29b-41d4-a716-446655440000',
+      chatSessionId: VALID_SESSION_ID,
       messages,
     };
     const result = chatRequestSchema.safeParse(invalid);

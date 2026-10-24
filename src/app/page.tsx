@@ -14,7 +14,7 @@ import { useChat } from '@/hooks/use-chat';
 export default function DocumentQAPage() {
   const { isAuthOpen, closeAuth } = useAuth();
   const {
-    activeDoc,
+    activeSession,
     isPreviewOpen,
     setIsPreviewOpen,
     isDrawerOpen,
@@ -27,29 +27,22 @@ export default function DocumentQAPage() {
       <div className="hidden lg:flex">
         <Sidebar />
       </div>
-
       <MobileSidebar />
-
       <main className="relative flex flex-1 flex-col bg-bg">
         <Header onOpenPreview={() => setIsPreviewOpen(true)} />
         <MessagesFeed />
         <ChatInput />
       </main>
-
       <CitationDrawer
         isOpen={isDrawerOpen}
         onClose={() => setIsDrawerOpen(false)}
         citation={selectedCitation}
       />
-
       <AuthModal isOpen={isAuthOpen} onClose={closeAuth} />
-
       <PdfPreviewer
         isOpen={isPreviewOpen}
         onClose={() => setIsPreviewOpen(false)}
-        documentId={activeDoc?.id}
-        fileName={activeDoc ? activeDoc.name : ''}
-        fileBlobUrl={activeDoc?.blobUrl}
+        fileName={activeSession ? activeSession.title : ''}
       />
     </div>
   );

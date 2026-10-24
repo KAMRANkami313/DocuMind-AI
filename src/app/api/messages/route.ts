@@ -14,7 +14,7 @@ import {
 import { RATE_LIMIT } from '@/lib/constants';
 import type { Citation } from '@/types';
 
-interface DocumentRow {
+interface SessionRow {
   id: string;
   user_id: string | null;
 }
@@ -28,51 +28,50 @@ interface ChatMessageRow {
 }
 
 const insertMessageSchema = z.object({
-  documentId: z.string().uuid(),
+  chatSessionId: z.string().uuid(),
   role: z.enum(['user', 'assistant', 'system']),
   content: z.string().min(1).max(10_000),
   citations: z.array(z.any()).optional(),
 });
 
-async function ensureOwnership(
-  documentId: string,
+async function ensureSessionOwnership(
+  sessionId: string,
   expectedUserId: string | null,
-): Promise<DocumentRow> {
-  const { data: docData } = await supabaseAdmin
-    .from('documents')
+): Promise<void> {
+  const { data: sessData } = await supabaseAdmin
+    .from('chat_sessions')
     .select('id, user_id')
-    .eq('id', documentId)
-    .single<DocumentRow>();
+    .eq('id', sessionId)
+    .single<SessionRow>();
 
-  if (!docData) {
-    throw notFound('Document not found.');
+  if (!sessData) {
+    throw notFound('Chat session not found.');
   }
-  if (docData.user_id !== expectedUserId) {
-    throw forbidden('You do not have access to this document.');
+  if (sessData.user_id !== expectedUserId) {
+    throw forbidden('You do not have access to this chat session.');
   }
-  return docData;
 }
 
 export async function GET(req: NextRequest) {
   try {
     const session = await resolveSession();
     const { searchParams } = new URL(req.url);
-    const documentId = searchParams.get('documentId');
+    const chatSessionId = searchParams.get('chatSessionId');
 
-    if (!documentId) {
-      throw badRequest('documentId query parameter is required.');
+    if (!chatSessionId) {
+      throw badRequest('chatSessionId query parameter is required.');
     }
 
-    await ensureOwnership(documentId, session.user?.id ?? null);
+    await ensureSessionOwnership(chatSessionId, session.user?.id ?? null);
 
     const { data: messages, error } = await supabaseAdmin
       .from('chat_messages')
       .select('id, role, content, citations, created_at')
-      .eq('document_id', documentId)
+      .eq('chat_session_id', chatSessionId)
       .order('created_at', { ascending: true });
 
     if (error) {
-      logger.error('Failed to load chat messages', { error, documentId });
+      logger.error('Failed to load chat messages', { error, chatSessionId });
       throw badRequest('Failed to load chat messages.');
     }
 
@@ -117,13 +116,13 @@ export async function POST(req: NextRequest) {
       throw badRequest('Invalid message body', parseResult.error.flatten());
     }
 
-    const { documentId, role, content, citations } = parseResult.data;
-    await ensureOwnership(documentId, session.user?.id ?? null);
+    const { chatSessionId, role, content, citations } = parseResult.data;
+    await ensureSessionOwnership(chatSessionId, session.user?.id ?? null);
 
     const { data: inserted, error: insertError } = await supabaseAdmin
       .from('chat_messages')
       .insert({
-        document_id: documentId,
+        chat_session_id: chatSessionId,
         user_id: session.user?.id ?? null,
         role,
         content,
@@ -135,11 +134,16 @@ export async function POST(req: NextRequest) {
     if (insertError || !inserted) {
       logger.error('Failed to insert chat message', {
         error: insertError,
-        documentId,
+        chatSessionId,
         role,
       });
       throw badRequest('Failed to save message.');
     }
+
+    await supabaseAdmin
+      .from('chat_sessions')
+      .update({ updated_at: new Date().toISOString() })
+      .eq('id', chatSessionId);
 
     return NextResponse.json({ id: inserted.id });
   } catch (error) {
@@ -158,23 +162,23 @@ export async function DELETE(req: NextRequest) {
   try {
     const session = await resolveSession();
     const { searchParams } = new URL(req.url);
-    const documentId = searchParams.get('documentId');
+    const chatSessionId = searchParams.get('chatSessionId');
     const messageId = searchParams.get('messageId');
 
-    if (!documentId) {
-      throw badRequest('documentId query parameter is required.');
+    if (!chatSessionId) {
+      throw badRequest('chatSessionId query parameter is required.');
     }
 
-    await ensureOwnership(documentId, session.user?.id ?? null);
+    await ensureSessionOwnership(chatSessionId, session.user?.id ?? null);
 
     if (messageId) {
       const { error } = await supabaseAdmin
         .from('chat_messages')
         .delete()
         .eq('id', messageId)
-        .eq('document_id', documentId);
+        .eq('chat_session_id', chatSessionId);
       if (error) {
-        logger.error('Failed to delete message', { error, messageId, documentId });
+        logger.error('Failed to delete message', { error, messageId, chatSessionId });
         throw badRequest('Failed to delete message.');
       }
       return NextResponse.json({ success: true });
@@ -183,9 +187,9 @@ export async function DELETE(req: NextRequest) {
     const { error } = await supabaseAdmin
       .from('chat_messages')
       .delete()
-      .eq('document_id', documentId);
+      .eq('chat_session_id', chatSessionId);
     if (error) {
-      logger.error('Failed to clear chat', { error, documentId });
+      logger.error('Failed to clear chat', { error, chatSessionId });
       throw badRequest('Failed to clear chat.');
     }
     return NextResponse.json({ success: true });

@@ -67,7 +67,7 @@ export async function POST(req: NextRequest) {
       throw badRequest('Invalid request body', parseResult.error.flatten());
     }
 
-    const { documentId, documentIds, messages } = parseResult.data;
+    const { chatSessionId, messages } = parseResult.data;
     const lastMessage = messages[messages.length - 1];
     if (!lastMessage) {
       throw badRequest('At least one message is required.');
@@ -75,28 +75,37 @@ export async function POST(req: NextRequest) {
     const latestUserMessage = lastMessage.content.trim();
 
     const queryClient = supabaseAdmin;
-
-    const { data: docData } = await queryClient
-      .from('documents')
-      .select('id, title, user_id')
-      .eq('id', documentId)
-      .single<DocumentRow>();
-
-    if (!docData) {
-      throw notFound('Document not found or not accessible.');
-    }
-
     const expectedUserId = session.user?.id ?? null;
-    if (docData.user_id !== expectedUserId) {
-      throw forbidden('You do not have access to this document.');
+
+    const { data: sessData } = await queryClient
+      .from('chat_sessions')
+      .select('id, user_id, title')
+      .eq('id', chatSessionId)
+      .single<{ id: string; user_id: string | null; title: string }>();
+
+    if (!sessData) {
+      throw notFound('Chat session not found.');
+    }
+    if (sessData.user_id !== expectedUserId) {
+      throw forbidden('You do not have access to this chat session.');
     }
 
-    const allDocIds = documentIds && documentIds.length > 0 ? documentIds : [documentId];
+    const { data: sessionDocs } = await queryClient
+      .from('chat_session_documents')
+      .select('document_id')
+      .eq('chat_session_id', chatSessionId);
 
-    const docTitle =
-      allDocIds.length > 1
-        ? `${docData.title ?? 'Document'} + ${allDocIds.length - 1} more`
-        : docData.title ?? 'Uploaded Document';
+    const allDocIds = ((sessionDocs ?? []) as Array<{ document_id: string }>).map(
+      (d) => d.document_id,
+    );
+
+    if (allDocIds.length === 0) {
+      throw badRequest('No documents attached to this chat. Please attach a document first.');
+    }
+
+    const docTitle = allDocIds.length > 1
+      ? `${sessData.title} (${allDocIds.length} docs)`
+      : sessData.title;
 
     let queryForSearch = latestUserMessage;
     if (latestUserMessage.split(' ').length <= 3 && messages.length >= 3) {

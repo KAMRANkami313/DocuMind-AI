@@ -19,8 +19,7 @@ export const chatMessageSchema = z.object({
 });
 
 export const chatRequestSchema = z.object({
-  documentId: z.string().uuid('Invalid document ID'),
-  documentIds: z.array(z.string().uuid()).min(1).max(3).optional(),
+  chatSessionId: z.string().uuid('Invalid chat session ID'),
   messages: z.array(chatMessageSchema).min(1, 'At least one message is required').max(50),
 });
 

@@ -1,50 +1,49 @@
 'use client';
 
-import { FileText, Sparkles, UploadCloud } from 'lucide-react';
+import { FileText, MessageSquare, Search, GitCompare, UploadCloud } from 'lucide-react';
 import { useAuth } from '@/hooks/use-auth';
-import { cn } from '@/lib/utils';
 
 interface EmptyStateProps {
-  hasActiveDoc: boolean;
+  hasActiveSession: boolean;
 }
 
-export function EmptyState({ hasActiveDoc }: EmptyStateProps) {
+export function EmptyState({ hasActiveSession }: EmptyStateProps) {
   const { user } = useAuth();
+
+  const cards = [
+    { icon: MessageSquare, title: 'Start a new chat', desc: 'Ask anything about your documents' },
+    { icon: UploadCloud, title: 'Upload documents', desc: 'Add PDF or text files to chat with' },
+    { icon: Search, title: 'Find specific information', desc: 'Search across your documents' },
+    { icon: GitCompare, title: 'Compare documents', desc: 'Side by side analysis' },
+  ];
+
   return (
-    <div className="flex flex-1 flex-col items-center justify-center px-6 text-center py-12">
+    <div className="flex flex-1 flex-col items-center justify-center px-6 py-12">
       <div className="relative mb-6">
         <div className="absolute inset-0 rounded-full bg-primary/20 blur-3xl" />
         <div className="relative flex h-20 w-20 items-center justify-center rounded-2xl bg-primary-soft border border-primary/30">
-          {hasActiveDoc ? (
-            <FileText className="h-10 w-10 text-primary" />
-          ) : (
-            <Sparkles className="h-10 w-10 text-primary" />
-          )}
+          <FileText className="h-10 w-10 text-primary" />
         </div>
       </div>
-
       <h2 className="text-2xl font-bold tracking-tight text-fg">
-        {hasActiveDoc ? 'Ready to chat' : 'Welcome to DocuMind AI'}
+        {hasActiveSession ? 'Ready to chat' : 'Welcome to DocuMind AI'}
       </h2>
-      <p
-        className={cn(
-          'mt-2 max-w-md text-sm leading-relaxed',
-          'text-fg-muted',
-        )}
-      >
-        {hasActiveDoc
-          ? 'Your document is loaded. Type a question below, or pick a suggested follow-up from any previous answer.'
+      <p className="mt-2 max-w-md text-sm text-fg-muted text-center">
+        {hasActiveSession
+          ? 'Attach a document using the paperclip button, then ask any question.'
           : user
-            ? 'Upload a PDF to start analyzing. Your documents and chat history sync automatically.'
-            : 'Upload any PDF to start chatting instantly. Guest mode keeps everything local to this browser.'}
+            ? 'Click "New Chat" to start. Attach documents and ask questions with cited answers.'
+            : 'Sign in to sync your documents across devices, or use guest mode.'}
       </p>
-
-      {!hasActiveDoc && (
-        <div className="mt-6 flex items-center gap-2 text-xs text-fg-subtle">
-          <UploadCloud className="h-3.5 w-3.5" />
-          <span>Drag and drop a PDF into the sidebar to begin</span>
-        </div>
-      )}
+      <div className="mt-8 grid grid-cols-2 gap-3 sm:grid-cols-4">
+        {cards.map((card, i) => (
+          <div key={i} className="flex flex-col items-center gap-2 rounded-xl border border-border bg-surface p-4 text-center">
+            <card.icon className="h-6 w-6 text-primary" />
+            <p className="text-xs font-medium text-fg">{card.title}</p>
+            <p className="text-[10px] text-fg-subtle">{card.desc}</p>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }

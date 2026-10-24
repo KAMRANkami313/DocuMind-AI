@@ -91,3 +91,16 @@ export interface StreamMetaEvent {
 export interface StreamTextEvent {
   text: string;
 }
+
+export interface ChatSession {
+  id: string;
+  title: string;
+  preview?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ChatSessionDocument {
+  documentId: string;
+  documentName: string;
+}

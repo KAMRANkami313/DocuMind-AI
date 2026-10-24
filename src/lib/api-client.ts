@@ -50,8 +50,7 @@ export async function uploadDocument(args: UploadDocumentArgs): Promise<UploadRe
 }
 
 export interface StreamChatArgs {
-  documentId: string;
-  documentIds?: string[];
+  chatSessionId: string;
   messages: ChatMessage[];
   onCitations: (citations: Citation[]) => void;
   onText: (text: string) => void;
@@ -63,8 +62,7 @@ export async function streamChat(args: StreamChatArgs): Promise<void> {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      documentId: args.documentId,
-      documentIds: args.documentIds,
+      chatSessionId: args.chatSessionId,
       messages: args.messages,
     }),
     signal: args.signal,
@@ -113,7 +111,7 @@ export async function streamChat(args: StreamChatArgs): Promise<void> {
 }
 
 export interface InsertMessageArgs {
-  documentId: string;
+  chatSessionId: string;
   role: 'user' | 'assistant' | 'system';
   content: string;
   citations?: Citation[];
@@ -140,10 +138,10 @@ export interface LoadMessagesResponse {
 }
 
 export async function loadChatMessages(
-  documentId: string,
+  chatSessionId: string,
 ): Promise<ChatMessage[]> {
   const res = await fetch(
-    `/api/messages?documentId=${encodeURIComponent(documentId)}`,
+    `/api/messages?chatSessionId=${encodeURIComponent(chatSessionId)}`,
     { method: 'GET' },
   );
   if (!res.ok) await parseError(res);
@@ -152,22 +150,101 @@ export async function loadChatMessages(
 }
 
 export async function deleteChatMessage(
-  documentId: string,
+  chatSessionId: string,
   messageId: string,
 ): Promise<void> {
   const res = await fetch(
-    `/api/messages?documentId=${encodeURIComponent(documentId)}&messageId=${encodeURIComponent(messageId)}`,
+    `/api/messages?chatSessionId=${encodeURIComponent(chatSessionId)}&messageId=${encodeURIComponent(messageId)}`,
     { method: 'DELETE' },
   );
   if (!res.ok) await parseError(res);
 }
 
-export async function clearChatMessages(documentId: string): Promise<void> {
+export async function clearChatMessages(chatSessionId: string): Promise<void> {
   const res = await fetch(
-    `/api/messages?documentId=${encodeURIComponent(documentId)}`,
+    `/api/messages?chatSessionId=${encodeURIComponent(chatSessionId)}`,
     { method: 'DELETE' },
   );
   if (!res.ok) await parseError(res);
+}
+
+export interface ChatSessionListResponse {
+  sessions: Array<{
+    id: string;
+    title: string;
+    preview?: string;
+    createdAt: string;
+    updatedAt: string;
+  }>;
+}
+
+export async function listChatSessions(): Promise<ChatSessionListResponse['sessions']> {
+  const res = await fetch('/api/chat-sessions', { method: 'GET' });
+  if (!res.ok) await parseError(res);
+  const data = (await res.json()) as ChatSessionListResponse;
+  return data.sessions;
+}
+
+export async function createChatSession(): Promise<{
+  id: string;
+  title: string;
+  createdAt: string;
+  updatedAt: string;
+}> {
+  const res = await fetch('/api/chat-sessions', { method: 'POST' });
+  if (!res.ok) await parseError(res);
+  return await res.json();
+}
+
+export async function deleteChatSession(sessionId: string): Promise<void> {
+  const res = await fetch(
+    `/api/chat-sessions?id=${encodeURIComponent(sessionId)}`,
+    { method: 'DELETE' },
+  );
+  if (!res.ok) await parseError(res);
+}
+
+export interface LoadSessionResponse {
+  id: string;
+  title: string;
+  messages: ChatMessage[];
+  documents: Array<{ documentId: string; documentName: string }>;
+}
+
+export async function loadChatSession(sessionId: string): Promise<LoadSessionResponse> {
+  const res = await fetch(`/api/chat-sessions/${encodeURIComponent(sessionId)}`, {
+    method: 'GET',
+  });
+  if (!res.ok) await parseError(res);
+  return (await res.json()) as LoadSessionResponse;
+}
+
+export async function renameChatSession(
+  sessionId: string,
+  title: string,
+): Promise<void> {
+  const res = await fetch(`/api/chat-sessions/${encodeURIComponent(sessionId)}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ title }),
+  });
+  if (!res.ok) await parseError(res);
+}
+
+export async function attachDocumentToSession(
+  sessionId: string,
+  documentId: string,
+): Promise<{ documentId: string; documentName: string }> {
+  const res = await fetch(
+    `/api/chat-sessions/${encodeURIComponent(sessionId)}/documents`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ documentId }),
+    },
+  );
+  if (!res.ok) await parseError(res);
+  return await res.json();
 }
 
 export interface DocumentPageContent {
