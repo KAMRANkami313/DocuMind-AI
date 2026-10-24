@@ -18,12 +18,6 @@ import { RATE_LIMIT, RETRIEVAL, LLM } from '@/lib/constants';
 
 export const maxDuration = 30;
 
-interface DocumentRow {
-  id: string;
-  title: string | null;
-  user_id: string | null;
-}
-
 interface ChunkRow {
   id?: string;
   content: string;

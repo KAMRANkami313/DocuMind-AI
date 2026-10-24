@@ -1,6 +1,6 @@
 'use client';
 
-import { Eye, MoreVertical, RotateCcw, Download, FileText, Layers } from 'lucide-react';
+import { Eye, MoreVertical, RotateCcw, Download, FileText } from 'lucide-react';
 import * as React from 'react';
 import { useChat } from '@/hooks/use-chat';
 import { ThemeToggle } from '@/components/theme/theme-toggle';

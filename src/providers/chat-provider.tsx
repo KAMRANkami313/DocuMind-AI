@@ -77,7 +77,6 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
   const [isPreviewOpen, setIsPreviewOpen] = React.useState(false);
 
   const abortControllerRef = React.useRef<AbortController | null>(null);
-  const loadedSessionsRef = React.useRef<Set<string>>(new Set());
 
   const activeSession = React.useMemo(
     () => sessions.find((s) => s.id === activeSessionId) ?? null,
@@ -86,43 +85,41 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
 
   React.useEffect(() => {
     let active = true;
-    async function loadSessions() {
+    async function loadSessionsAndDocs() {
       if (!user) return;
-      const userId = user.id;
-      if (loadedSessionsRef.current.has(userId)) return;
-      loadedSessionsRef.current.add(userId);
-
       try {
         const sessList = await listChatSessions();
         if (!active) return;
         setSessions(sessList);
-        if (sessList.length > 0 && !activeSessionId) {
-          setActiveSessionId(sessList[0]!.id);
+        if (sessList.length > 0) {
+          setActiveSessionId((prev) => prev ?? sessList[0]!.id);
         }
       } catch (err) {
         const message = err instanceof Error ? err.message : 'Unknown error';
-        showError('Failed to load chat sessions', message);
+        if (active) showError('Failed to load chat sessions', message);
       }
-
-      const { supabase } = await import('@/lib/supabase/client');
-      const { data: userDocs } = await supabase
-        .from('documents')
-        .select('id, title, file_name')
-        .eq('user_id', userId)
-        .order('created_at', { ascending: false });
-      if (!active) return;
-      if (userDocs) {
-        const formatted: DocumentMeta[] = (userDocs as Array<{ id: string; file_name: string | null; title: string | null }>).map((d) => ({
-          id: d.id,
-          name: d.file_name ?? d.title ?? 'Untitled',
-        }));
-        setDocuments(formatted);
+      try {
+        const { supabase } = await import('@/lib/supabase/client');
+        const { data: userDocs } = await supabase
+          .from('documents')
+          .select('id, title, file_name')
+          .eq('user_id', user.id)
+          .order('created_at', { ascending: false });
+        if (!active) return;
+        if (userDocs) {
+          const formatted: DocumentMeta[] = (userDocs as Array<{ id: string; file_name: string | null; title: string | null }>).map((d) => ({
+            id: d.id,
+            name: d.file_name ?? d.title ?? 'Untitled',
+          }));
+          setDocuments(formatted);
+        }
+      } catch {
+        // Document library load failed — non-critical
       }
     }
     if (user) {
-      void loadSessions();
+      void loadSessionsAndDocs();
     } else {
-      loadedSessionsRef.current.clear();
       setSessions([]);
       setActiveSessionId(null);
       setMessages([]);
@@ -130,12 +127,12 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
       setDocuments([]);
     }
     return () => { active = false; };
-  }, [user, activeSessionId, showError]);
+  }, [user, showError]);
 
   React.useEffect(() => {
     let active = true;
     async function loadSessionData() {
-      if (!activeSessionId) {
+      if (!activeSessionId || !user) {
         setMessages([]);
         setAttachedDocs([]);
         return;
@@ -147,12 +144,12 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
         setAttachedDocs(data.documents);
       } catch (err) {
         const message = err instanceof Error ? err.message : 'Unknown error';
-        showError('Failed to load chat', message);
+        if (active) showError('Failed to load chat', message);
       }
     }
     void loadSessionData();
     return () => { active = false; };
-  }, [activeSessionId, showError]);
+  }, [activeSessionId, user, showError]);
 
   const createNewChat = React.useCallback(async () => {
     if (activeSession && messages.length === 0 && attachedDocs.length === 0) {

@@ -1,7 +1,7 @@
 'use client';
 
 import * as React from 'react';
-import { Send, Paperclip, Loader2, X } from 'lucide-react';
+import { Send, Paperclip } from 'lucide-react';
 import { useChat } from '@/hooks/use-chat';
 import { StopButton } from '@/components/chat/stop-button';
 import { MAX_DOCUMENTS_PER_CHAT } from '@/lib/constants';

@@ -10,11 +10,6 @@ interface SessionRow {
   user_id: string | null;
 }
 
-interface DocRow {
-  document_id: string;
-  documents: Array<{ id: string; title: string | null; file_name: string | null }>;
-}
-
 interface MsgRow {
   id: string;
   role: string;
@@ -46,13 +41,24 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
       .eq('chat_session_id', sessionId)
       .order('created_at', { ascending: true });
 
-    const { data: docs } = await supabaseAdmin
+    const { data: sessionDocs } = await supabaseAdmin
       .from('chat_session_documents')
-      .select('document_id, documents(id, title, file_name)')
+      .select('document_id')
       .eq('chat_session_id', sessionId);
 
+    const docIds = ((sessionDocs ?? []) as Array<{ document_id: string }>).map((d) => d.document_id);
+    const docNames: Record<string, string> = {};
+    if (docIds.length > 0) {
+      const { data: docRows } = await supabaseAdmin
+        .from('documents')
+        .select('id, title, file_name')
+        .in('id', docIds);
+      for (const d of (docRows ?? []) as Array<{ id: string; title: string | null; file_name: string | null }>) {
+        docNames[d.id] = d.file_name ?? d.title ?? 'Unknown';
+      }
+    }
+
     const typedMsgs = (msgs ?? []) as MsgRow[];
-    const typedDocs = (docs ?? []) as DocRow[];
 
     return NextResponse.json({
       id: sess.id,
@@ -64,9 +70,9 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
         citations: (m.citations as []) ?? [],
         createdAt: m.created_at,
       })),
-      documents: typedDocs.map((d) => ({
-        documentId: d.document_id,
-        documentName: d.documents?.[0]?.file_name ?? d.documents?.[0]?.title ?? 'Unknown',
+      documents: docIds.map((id) => ({
+        documentId: id,
+        documentName: docNames[id] ?? 'Unknown',
       })),
     });
   } catch (error) {
