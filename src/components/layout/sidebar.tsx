@@ -124,8 +124,23 @@ export function Sidebar({ className, onNavigate, onToggleCollapse, isCollapsed }
   }
 
   return (
-    <aside className={cn('flex w-72 shrink-0 flex-col border-r border-border bg-surface p-3', className)}>
-      <div className="mb-4 flex items-center justify-between">
+    // h-full + min-h-0: ensures the aside always fills its parent's height
+    // (desktop lg:flex container OR mobile Sheet panel). Without h-full, the
+    // mobile sidebar's chat list (`flex-1 overflow-y-auto`) had no bounded
+    // height, so touch scroll silently failed and the profile section got
+    // pushed off-screen when there were many chats.
+    //
+    // overscroll-y-contain on the chat list below prevents scroll chaining
+    // to the body when the list reaches its top/bottom, which is critical
+    // for native-feeling mobile scroll inside the Sheet drawer.
+    <aside
+      className={cn(
+        'flex h-full min-h-0 w-72 shrink-0 flex-col border-r border-border bg-surface p-3',
+        className,
+      )}
+    >
+      {/* Header — fixed at top, never scrolls */}
+      <div className="mb-4 flex shrink-0 items-center justify-between">
         <div className="flex items-center gap-2">
           <div className="rounded-lg border border-primary/30 bg-primary/10 p-1.5 text-primary">
             <Sparkles className="h-4 w-4" />
@@ -158,13 +173,13 @@ export function Sidebar({ className, onNavigate, onToggleCollapse, isCollapsed }
       <button
         onClick={handleNewChat}
         disabled={isStreaming}
-        className="mb-3 flex w-full cursor-pointer items-center gap-2 rounded-lg border border-primary/30 bg-primary-soft px-3 py-2 text-xs font-semibold text-primary transition hover:bg-primary/15 disabled:opacity-50"
+        className="mb-3 flex w-full shrink-0 cursor-pointer items-center gap-2 rounded-lg border border-primary/30 bg-primary-soft px-3 py-2 text-xs font-semibold text-primary transition hover:bg-primary/15 disabled:opacity-50"
       >
         <Plus className="h-4 w-4" /> New Chat
       </button>
 
       {sessions.length > 0 && (
-        <div className="relative mb-2">
+        <div className="relative mb-2 shrink-0">
           <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-fg-subtle" />
           <input
             type="text"
@@ -176,8 +191,19 @@ export function Sidebar({ className, onNavigate, onToggleCollapse, isCollapsed }
         </div>
       )}
 
-      <div className="mb-2 text-[10px] font-semibold tracking-wider text-fg-subtle uppercase">Recents</div>
-      <div className="flex-1 space-y-1 overflow-y-auto pr-1">
+      {/* Recents header — shrink-0 so it never compresses */}
+      <div className="mb-2 shrink-0 text-[10px] font-semibold tracking-wider text-fg-subtle uppercase">
+        Recents
+      </div>
+
+      {/* Scrollable chat list — min-h-0 is REQUIRED for flex-1 + overflow-y-auto
+          to work correctly inside a flex-col parent on iOS Safari. Without it,
+          the inner content's min-height defaults to "auto" and the flex-1 region
+          grows instead of scrolling. */}
+      <div
+        className="min-h-0 flex-1 space-y-1 overflow-y-auto overscroll-y-contain pr-1"
+        style={{ WebkitOverflowScrolling: 'touch' }}
+      >
         {filteredSessions.length === 0 ? (
           <div className="rounded-lg border border-dashed border-border p-3 text-center text-xs text-fg-subtle italic">
             {searchQuery ? 'No chats match your search.' : 'No chats yet.'}
@@ -281,7 +307,8 @@ export function Sidebar({ className, onNavigate, onToggleCollapse, isCollapsed }
         )}
       </div>
 
-      <div className="mt-3 border-t border-border pt-3">
+      {/* Library section — sticky bottom area, never scrolls */}
+      <div className="mt-3 shrink-0 border-t border-border pt-3">
         <button
           onClick={() => setShowLibrary(!showLibrary)}
           className="mb-2 flex w-full cursor-pointer items-center justify-between text-[10px] font-semibold tracking-wider text-fg-subtle uppercase"
@@ -290,7 +317,7 @@ export function Sidebar({ className, onNavigate, onToggleCollapse, isCollapsed }
           <ChevronDown className={cn('h-3 w-3 transition-transform', showLibrary && 'rotate-180')} />
         </button>
         {showLibrary && (
-          <div className="max-h-32 space-y-1 overflow-y-auto">
+          <div className="max-h-32 space-y-1 overflow-y-auto overscroll-y-contain">
             {documents.length === 0 ? (
               <p className="p-2 text-[10px] text-fg-subtle italic">No documents uploaded.</p>
             ) : (
@@ -317,7 +344,8 @@ export function Sidebar({ className, onNavigate, onToggleCollapse, isCollapsed }
         )}
       </div>
 
-      <div className="mt-3 border-t border-border pt-3">
+      {/* Profile / Sign-in section — sticky at the bottom, always visible. */}
+      <div className="mt-3 shrink-0 border-t border-border pt-3">
         {user ? (
           <div className="relative" ref={profileRef}>
             <button

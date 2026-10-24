@@ -16,6 +16,7 @@ import {
   X,
   ChevronDown,
   ChevronUp,
+  ChevronRight,
 } from 'lucide-react';
 import type { Citation } from '@/types';
 import { CodeBlock } from './code-block';
@@ -105,6 +106,13 @@ export function MessageItem({
     setIsEditing(false);
   }
 
+  // ⚠️ Mobile layout decision:
+  // On mobile (< sm), we use flex-col so the avatar sits on top and the
+  // content stack below it (left-aligned for assistant, right-aligned for
+  // user). On desktop (>= sm), we keep the legacy flex-row so the avatar
+  // sits beside the content. This matches modern chat UIs (ChatGPT,
+  // Claude) and eliminates the "icon takes a column of empty space under
+  // itself" anti-pattern on small screens.
   return (
     <motion.div
       initial="hidden"
@@ -112,23 +120,27 @@ export function MessageItem({
       variants={motionVariants}
       transition={{ duration: 0.25, ease: 'easeOut' }}
       className={cn(
-        'group flex w-full max-w-3xl gap-3',
-        isUser ? 'ml-auto justify-end' : 'mr-auto justify-start',
+        'group flex w-full max-w-3xl gap-2 sm:gap-3 flex-col items-start sm:flex-row sm:items-start',
+        isUser
+          ? 'ml-auto items-end sm:justify-end'
+          : 'mr-auto items-start sm:justify-start',
       )}
     >
+      {/* Avatar — top-left (assistant) or top-right (user) on mobile;
+          left side (assistant) or right side (user) on desktop */}
       {!isUser && (
-<div className="mt-1 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-primary/30 bg-primary/10 text-primary">
-  <Bot className="h-4 w-4" />
-</div>
+        <div className="flex h-8 w-8 shrink-0 items-center justify-center self-start rounded-lg border border-primary/30 bg-primary/10 text-primary sm:mt-1">
+          <Bot className="h-4 w-4" />
+        </div>
       )}
 
       <div className="relative w-full max-w-2xl space-y-2 overflow-hidden">
         <div
           className={cn(
-            'relative rounded-2xl p-4 text-sm leading-relaxed',
-isUser
-  ? 'rounded-br-md border border-user-bubble-border bg-user-bubble text-fg shadow-xs'
-  : 'rounded-bl-md border border-border bg-surface text-fg',
+            'relative rounded-2xl p-3 text-sm leading-relaxed sm:p-4 sm:text-[15px]',
+            isUser
+              ? 'rounded-br-md border border-user-bubble-border bg-user-bubble text-fg shadow-xs'
+              : 'rounded-bl-md border border-border bg-surface text-fg',
           )}
         >
           {!isEditing && (
@@ -187,27 +199,49 @@ isUser
                 </div>
               </div>
             ) : (
-              <p className="whitespace-pre-wrap">{mainContent}</p>
+              <p className="whitespace-pre-wrap wrap-break-word">{mainContent}</p>
             )
           ) : (
-            <div className="prose-documind max-w-none space-y-2 overflow-x-auto text-xs leading-relaxed sm:text-sm">
+            // ⚠️ Markdown container: removed `overflow-x-auto` here (was breaking
+            // touch scroll inside the chat feed). Each scrollable child (tables,
+            // code blocks, math) keeps its own overflow-x-auto wrapper so users
+            // can scroll wide content horizontally without scrolling the whole
+            // message bubble.
+            //
+            // Font sizes: bumped from text-xs/sm → text-sm/[15px] for better
+            // mobile readability (the user reported the previous size looked
+            // too small on phone screens).
+            <div className="prose-documind max-w-none space-y-2 text-sm leading-relaxed sm:text-[15px]">
               <ReactMarkdown
                 remarkPlugins={[remarkGfm, remarkMath]}
                 components={{
+                  // ⚠️ Tables: use min-w-max instead of min-w-full so wide
+                  // tables NEVER shrink columns to fit the viewport. The
+                  // wrapper has overflow-x-auto so users scroll horizontally
+                  // inside the table only, not the whole page. A subtle
+                  // gradient hint on the right edge signals "more columns
+                  // available" (industry-standard pattern from Notion / Linear).
                   table: ({ children }) => (
-                    <div className="my-3 overflow-x-auto rounded-lg border border-border">
-                      <table className="min-w-full divide-y divide-border text-left text-xs">
+                    <div className="group/table relative my-3 overflow-x-auto rounded-lg border border-border overscroll-x-contain">
+                      <table className="min-w-max divide-y divide-border text-left text-xs sm:text-sm">
                         {children}
                       </table>
+                      <div
+                        className="pointer-events-none absolute right-0 top-0 z-10 h-full w-8 bg-linear-to-l from-surface-2 to-transparent opacity-100 transition-opacity group-hover/table:opacity-0"
+                        aria-hidden="true"
+                      />
                     </div>
                   ),
+                  thead: ({ children }) => (
+                    <thead className="bg-surface-2">{children}</thead>
+                  ),
                   th: ({ children }) => (
-                    <th className="bg-surface-2 px-3 py-2 font-semibold text-fg">
+                    <th className="whitespace-nowrap px-3 py-2 text-left font-semibold text-fg">
                       {children}
                     </th>
                   ),
                   td: ({ children }) => (
-                    <td className="border-t border-border px-3 py-2 text-fg-muted">
+                    <td className="border-t border-border px-3 py-2 align-top text-fg-muted">
                       {children}
                     </td>
                   ),
@@ -215,7 +249,7 @@ isUser
                     const isInline = !className;
                     if (isInline) {
                       return (
-                        <code className="rounded bg-surface-2 px-1.5 py-0.5 font-mono text-xs text-primary border border-border">
+                        <code className="rounded bg-surface-2 px-1.5 py-0.5 font-mono text-xs text-primary border border-border wrap-break-word">
                           {children}
                         </code>
                       );
@@ -234,7 +268,7 @@ isUser
                       href={href}
                       target="_blank"
                       rel="noreferrer"
-                      className="text-primary underline underline-offset-2 hover:text-primary-hover"
+                      className="text-primary underline underline-offset-2 hover:text-primary-hover wrap-break-word"
                     >
                       {children}
                     </a>
@@ -244,9 +278,12 @@ isUser
                       {children}
                     </blockquote>
                   ),
+                  // ⚠️ Math: each block gets its own overflow-x-auto so
+                  // long equations scroll horizontally inside their own box,
+                  // not the whole message.
                   ...({
                     math: ({ value }: { value: string }) => (
-                      <div className="my-3 overflow-x-auto">
+                      <div className="my-3 overflow-x-auto overscroll-x-contain">
                         <BlockMath math={value} />
                       </div>
                     ),
@@ -263,7 +300,7 @@ isUser
         </div>
 
         {uniqueCitations.length > 0 && !isEditing && (
-          <div className="pt-1">
+          <div className={cn('pt-1 flex flex-wrap gap-1.5', isUser ? 'justify-end' : 'justify-start')}>
             <button
               type="button"
               onClick={() => setShowSources(!showSources)}
@@ -283,7 +320,7 @@ isUser
             </button>
 
             {showSources && (
-              <div className="mt-2 flex flex-wrap gap-1.5">
+              <div className="flex w-full flex-wrap gap-1.5">
                 {uniqueCitations.map((cite, cIdx) => (
                   <InlineCitation
                     key={cIdx}
@@ -297,7 +334,7 @@ isUser
         )}
 
         {suggestions.length > 0 && onSelectSuggestion && !isEditing && (
-          <div className="flex flex-wrap gap-1.5 pt-1.5">
+          <div className={cn('flex flex-wrap gap-1.5 pt-1.5', isUser ? 'justify-end' : 'justify-start')}>
             {suggestions.map((q, sIdx) => (
               <button
                 key={sIdx}
@@ -311,6 +348,7 @@ isUser
                 )}
               >
                 <span className="truncate max-w-md">{q}</span>
+                <ChevronRight className="h-3 w-3 shrink-0 opacity-60 transition-opacity group-hover/chip:opacity-100" />
               </button>
             ))}
           </div>
@@ -325,7 +363,7 @@ isUser
       </div>
 
       {isUser && (
-        <div className="mt-1 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-border bg-surface-2">
+        <div className="flex h-8 w-8 shrink-0 items-center justify-center self-end rounded-lg border border-border bg-surface-2 sm:mt-1">
           <User className="h-4 w-4 text-fg-muted" />
         </div>
       )}

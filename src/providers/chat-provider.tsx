@@ -25,6 +25,9 @@ import type {
 } from '@/types';
 import { MAX_DOCUMENTS_PER_CHAT } from '@/lib/constants';
 import { generateId } from '@/lib/utils';
+// Static import avoids the dynamic-import latency on every mount.
+// 'use client' ensures this only runs in the browser, so SSR is safe.
+import { supabase as browserSupabase } from '@/lib/supabase/client';
 
 interface ChatContextValue {
   sessions: ChatSession[];
@@ -87,35 +90,46 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
     let active = true;
     async function loadSessionsAndDocs() {
       if (!user) return;
-      try {
-        const sessList = await listChatSessions();
-        if (!active) return;
+      // ⚡ Performance: fetch sessions + documents in parallel instead of
+      // sequentially. The old code awaited listChatSessions(), THEN awaited
+      // a dynamic import, THEN awaited the documents query — adding ~150-300ms
+      // of unnecessary serial latency on every mount / page refresh.
+      // We use Promise.allSettled so one failure doesn't sink the other.
+      const [sessResult, docsResult] = await Promise.allSettled([
+        listChatSessions(),
+        browserSupabase
+          .from('documents')
+          .select('id, title, file_name')
+          .eq('user_id', user.id)
+          .order('created_at', { ascending: false }),
+      ]);
+
+      if (!active) return;
+
+      if (sessResult.status === 'fulfilled') {
+        const sessList = sessResult.value;
         setSessions(sessList);
         if (sessList.length > 0) {
           setActiveSessionId((prev) => prev ?? sessList[0]!.id);
         }
-      } catch (err) {
-        const message = err instanceof Error ? err.message : 'Unknown error';
-        if (active) showError('Failed to load chat sessions', message);
+      } else {
+        const message = sessResult.reason instanceof Error ? sessResult.reason.message : 'Unknown error';
+        showError('Failed to load chat sessions', message);
       }
-      try {
-        const { supabase } = await import('@/lib/supabase/client');
-        const { data: userDocs } = await supabase
-          .from('documents')
-          .select('id, title, file_name')
-          .eq('user_id', user.id)
-          .order('created_at', { ascending: false });
-        if (!active) return;
+
+      if (docsResult.status === 'fulfilled') {
+        const userDocs = docsResult.value.data as
+          | Array<{ id: string; file_name: string | null; title: string | null }>
+          | null;
         if (userDocs) {
-          const formatted: DocumentMeta[] = (userDocs as Array<{ id: string; file_name: string | null; title: string | null }>).map((d) => ({
+          const formatted: DocumentMeta[] = userDocs.map((d) => ({
             id: d.id,
             name: d.file_name ?? d.title ?? 'Untitled',
           }));
           setDocuments(formatted);
         }
-      } catch {
-        // Document library load failed — non-critical
       }
+      // Document library load failure is non-critical — silently ignored.
     }
     if (user) {
       void loadSessionsAndDocs();

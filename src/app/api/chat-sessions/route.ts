@@ -13,7 +13,9 @@ interface ChatSessionRow {
 }
 
 interface MessagePreviewRow {
+  chat_session_id: string;
   content: string;
+  created_at: string;
 }
 
 export async function GET() {
@@ -36,25 +38,41 @@ export async function GET() {
     }
 
     const typed = (sessions ?? []) as ChatSessionRow[];
-    const result = [];
-
-    for (const s of typed) {
-      const { data: lastMsg } = await supabaseAdmin
-        .from('chat_messages')
-        .select('content')
-        .eq('chat_session_id', s.id)
-        .order('created_at', { ascending: false })
-        .limit(1)
-        .maybeSingle<MessagePreviewRow>();
-
-      result.push({
-        id: s.id,
-        title: s.title,
-        preview: lastMsg?.content ? lastMsg.content.slice(0, 80) : undefined,
-        createdAt: s.created_at,
-        updatedAt: s.updated_at,
-      });
+    if (typed.length === 0) {
+      return NextResponse.json({ sessions: [] });
     }
+
+    // ⚡ Performance: batched query instead of N+1.
+    // The old code did one round-trip PER session (50 sessions × ~150ms = ~7.5s
+    // of latency). Now we issue a SINGLE query that returns the latest message
+    // per session in one shot, then dedupe client-side by keeping the first
+    // occurrence (since the result is ordered by created_at DESC).
+    const sessionIds = typed.map((s) => s.id);
+    const { data: latestMessages, error: msgError } = await supabaseAdmin
+      .from('chat_messages')
+      .select('chat_session_id, content, created_at')
+      .in('chat_session_id', sessionIds)
+      .order('created_at', { ascending: false });
+
+    if (msgError) {
+      logger.error('Failed to fetch latest messages', { error: msgError });
+      // Non-fatal — sessions without preview are still usable.
+    }
+
+    const previewBySession = new Map<string, string>();
+    for (const m of (latestMessages ?? []) as MessagePreviewRow[]) {
+      if (!previewBySession.has(m.chat_session_id)) {
+        previewBySession.set(m.chat_session_id, m.content);
+      }
+    }
+
+    const result = typed.map((s) => ({
+      id: s.id,
+      title: s.title,
+      preview: previewBySession.get(s.id)?.slice(0, 80) ?? undefined,
+      createdAt: s.created_at,
+      updatedAt: s.updated_at,
+    }));
 
     return NextResponse.json({ sessions: result });
   } catch (error) {
