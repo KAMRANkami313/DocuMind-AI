@@ -120,24 +120,43 @@ export async function PATCH(
     }
 
     const body: unknown = await req.json();
-    const { title } = body as { title?: string };
-    if (!title || title.trim().length === 0) {
-      throw badRequest('Title is required.');
+    const { title, attachedDocumentIds } = body as {
+      title?: string;
+      attachedDocumentIds?: string[];
+    };
+
+    const updateData: Record<string, unknown> = {};
+    if (title !== undefined && title.trim().length > 0) {
+      updateData.title = title.trim();
     }
+    if (attachedDocumentIds !== undefined) {
+      if (!Array.isArray(attachedDocumentIds) || attachedDocumentIds.length > 2) {
+        throw badRequest('attachedDocumentIds must be an array with at most 2 entries (3 total with primary).');
+      }
+      updateData.attached_document_ids = attachedDocumentIds;
+    }
+
+    if (Object.keys(updateData).length === 0) {
+      throw badRequest('No valid fields to update.');
+    }
+
+    const selectCols = Object.keys(updateData).includes('title')
+      ? 'id, title'
+      : 'id, attached_document_ids';
 
     const { data: updated, error: updateError } = await supabaseAdmin
       .from('documents')
-      .update({ title: title.trim() })
+      .update(updateData)
       .eq('id', documentId)
-      .select('id, title')
-      .single<{ id: string; title: string }>();
+      .select(selectCols)
+      .single<Record<string, unknown>>();
 
     if (updateError || !updated) {
-      logger.error('Failed to rename document', { error: updateError, documentId });
-      throw badRequest('Failed to rename document.');
+      logger.error('Failed to update document', { error: updateError, documentId });
+      throw badRequest('Failed to update document.');
     }
 
-    return NextResponse.json({ id: updated.id, title: updated.title });
+    return NextResponse.json(updated);
   } catch (error) {
     const appError = toAppError(error);
     logger.error('PATCH /api/documents/[id] failed', {

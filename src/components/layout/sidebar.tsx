@@ -1,7 +1,18 @@
 'use client';
 
 import * as React from 'react';
-import { Check, FileText, LogIn, LogOut, Pencil, Search, Sparkles, Trash2, X } from 'lucide-react';
+import {
+  Check,
+  FileText,
+  LogIn,
+  LogOut,
+  Paperclip,
+  Pencil,
+  Search,
+  Sparkles,
+  Trash2,
+  X,
+} from 'lucide-react';
 import { useAuth } from '@/hooks/use-auth';
 import { useChat } from '@/hooks/use-chat';
 import { FileUpload } from '@/components/document/file-upload';
@@ -23,6 +34,8 @@ export function Sidebar({ className, onNavigate }: SidebarProps) {
     deleteDocument,
     addDocument,
     renameDocument,
+    attachedDocIds,
+    attachDocument,
   } = useChat();
 
   const [searchQuery, setSearchQuery] = React.useState('');
@@ -176,6 +189,12 @@ export function Sidebar({ className, onNavigate }: SidebarProps) {
             filteredDocs.map((doc) => {
               const isSelected = activeDoc?.id === doc.id;
               const isEditing = editingId === doc.id;
+              const canAttach =
+                activeDoc &&
+                doc.id !== activeDoc.id &&
+                attachedDocIds.length < 2 &&
+                !attachedDocIds.includes(doc.id);
+
               return (
                 <div
                   key={doc.id}
@@ -249,6 +268,19 @@ export function Sidebar({ className, onNavigate }: SidebarProps) {
                       </>
                     ) : (
                       <>
+                        {canAttach && (
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              attachDocument(doc);
+                            }}
+                            title="Attach to current chat"
+                            className="cursor-pointer p-1 text-fg-subtle opacity-0 transition hover:text-primary group-hover:opacity-100"
+                          >
+                            <Paperclip className="h-3.5 w-3.5" />
+                          </button>
+                        )}
                         <button
                           type="button"
                           onClick={(e) => handleStartRename(doc, e)}

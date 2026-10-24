@@ -44,6 +44,7 @@ export interface Citation {
   pageNumber: number;
   excerpt: string;
   similarity: number;
+  documentTitle?: string;
 }
 
 export interface ChatMessage {
@@ -83,6 +84,7 @@ export interface StreamMetaEvent {
     content: string;
     pageNumber: number;
     similarity: number;
+    documentTitle?: string;
   }>;
 }
 

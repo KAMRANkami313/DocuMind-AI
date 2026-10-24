@@ -30,6 +30,10 @@ interface ChatContextValue {
   selectedCitation: Citation | null;
   isDrawerOpen: boolean;
   isPreviewOpen: boolean;
+  attachedDocIds: string[];
+  attachedDocNames: Map<string, string>;
+  attachDocument: (doc: DocumentMeta) => void;
+  detachDocument: (docId: string) => void;
   setInput: React.Dispatch<React.SetStateAction<string>>;
   setActiveDoc: React.Dispatch<React.SetStateAction<DocumentMeta | null>>;
   setIsPreviewOpen: React.Dispatch<React.SetStateAction<boolean>>;
@@ -70,6 +74,8 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
   const [selectedCitation, setSelectedCitation] = React.useState<Citation | null>(null);
   const [isDrawerOpen, setIsDrawerOpen] = React.useState(false);
   const [isPreviewOpen, setIsPreviewOpen] = React.useState(false);
+  const [attachedDocIds, setAttachedDocIds] = React.useState<string[]>([]);
+  const [attachedDocNames, setAttachedDocNames] = React.useState<Map<string, string>>(new Map());
 
   const abortControllerRef = React.useRef<AbortController | null>(null);
   const loadedDocsRef = React.useRef<Set<string>>(new Set());
@@ -108,6 +114,8 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
       setDocuments([]);
       setActiveDoc(null);
       setChatSessions({});
+      setAttachedDocIds([]);
+      setAttachedDocNames(new Map());
     }
     return () => {
       active = false;
@@ -208,6 +216,7 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
       try {
         await streamChat({
           documentId: activeDocId,
+          documentIds: attachedDocIds.length > 0 ? [activeDocId, ...attachedDocIds] : undefined,
           messages: messagesToSend,
           signal: abortController.signal,
           onCitations: (citations) => {
@@ -274,7 +283,7 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
         setIsStreaming(false);
       }
     },
-    [activeDoc, userId, showError],
+    [activeDoc, userId, showError, attachedDocIds],
   );
 
   const stopGeneration = React.useCallback(() => {
@@ -341,6 +350,30 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
 
   const switchDocument = React.useCallback((doc: DocumentMeta) => {
     setActiveDoc(doc);
+    setAttachedDocIds([]);
+    setAttachedDocNames(new Map());
+  }, []);
+
+  const attachDocument = React.useCallback((doc: DocumentMeta) => {
+    setAttachedDocIds((prev) => {
+      if (prev.includes(doc.id)) return prev;
+      if (prev.length >= 2) return prev;
+      return [...prev, doc.id];
+    });
+    setAttachedDocNames((prev) => {
+      const next = new Map(prev);
+      next.set(doc.id, doc.name);
+      return next;
+    });
+  }, []);
+
+  const detachDocument = React.useCallback((docId: string) => {
+    setAttachedDocIds((prev) => prev.filter((id) => id !== docId));
+    setAttachedDocNames((prev) => {
+      const next = new Map(prev);
+      next.delete(docId);
+      return next;
+    });
   }, []);
 
   const addDocument = React.useCallback((doc: DocumentMeta) => {
@@ -466,6 +499,10 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
       selectedCitation,
       isDrawerOpen,
       isPreviewOpen,
+      attachedDocIds,
+      attachedDocNames,
+      attachDocument,
+      detachDocument,
       setInput,
       setActiveDoc,
       setIsPreviewOpen,
@@ -495,6 +532,10 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
       selectedCitation,
       isDrawerOpen,
       isPreviewOpen,
+      attachedDocIds,
+      attachedDocNames,
+      attachDocument,
+      detachDocument,
       switchDocument,
       addDocument,
       renameDocument,

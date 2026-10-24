@@ -15,6 +15,8 @@ export const UPLOAD_LIMITS = {
   maxChunksPerDocument: 1500,
 } as const;
 
+export const MAX_DOCUMENTS_PER_CHAT = 3;
+
 export const CHUNKING = {
   chunkSize: 600,
   chunkOverlap: 100,

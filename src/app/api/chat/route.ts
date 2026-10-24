@@ -36,6 +36,7 @@ interface RetrievedChunk {
   content: string;
   pageNumber: number;
   similarity: number;
+  documentTitle?: string;
 }
 
 interface GroqDelta {
@@ -66,7 +67,7 @@ export async function POST(req: NextRequest) {
       throw badRequest('Invalid request body', parseResult.error.flatten());
     }
 
-    const { documentId, messages } = parseResult.data;
+    const { documentId, documentIds, messages } = parseResult.data;
     const lastMessage = messages[messages.length - 1];
     if (!lastMessage) {
       throw badRequest('At least one message is required.');
@@ -90,7 +91,12 @@ export async function POST(req: NextRequest) {
       throw forbidden('You do not have access to this document.');
     }
 
-    const docTitle = docData.title ?? 'Uploaded Document';
+    const allDocIds = documentIds && documentIds.length > 0 ? documentIds : [documentId];
+
+    const docTitle =
+      allDocIds.length > 1
+        ? `${docData.title ?? 'Document'} + ${allDocIds.length - 1} more`
+        : docData.title ?? 'Uploaded Document';
 
     let queryForSearch = latestUserMessage;
     if (latestUserMessage.split(' ').length <= 3 && messages.length >= 3) {
@@ -100,11 +106,7 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    const context = await retrieveContext(
-      queryClient,
-      documentId,
-      queryForSearch,
-    );
+    const context = await retrieveContext(queryClient, allDocIds, queryForSearch);
 
     const systemPrompt = buildSystemPrompt(docTitle, context);
 
@@ -165,63 +167,116 @@ export async function POST(req: NextRequest) {
 
 async function retrieveContext(
   client: typeof supabaseAdmin,
-  documentId: string,
+  docIds: string[],
   queryForSearch: string,
 ): Promise<RetrievedChunk[]> {
-  const { count } = await client
-    .from('document_chunks')
-    .select('*', { count: 'exact', head: true })
-    .eq('document_id', documentId);
+  const titleMap = await fetchDocTitles(client, docIds);
+  const queryVector = await generateEmbedding(queryForSearch);
 
-  const totalChunks = count ?? 0;
-
-  if (totalChunks <= RETRIEVAL.smallDocumentThreshold) {
-    const { data: allChunks } = await client
+  // If only 1 document is active
+  if (docIds.length === 1) {
+    const docId = docIds[0]!;
+    const { count } = await client
       .from('document_chunks')
-      .select('content, page_number')
-      .eq('document_id', documentId)
-      .order('page_number', { ascending: true });
+      .select('*', { count: 'exact', head: true })
+      .eq('document_id', docId);
 
-    if (!allChunks) return [];
-    const rows = allChunks as Pick<ChunkRow, 'content' | 'page_number'>[];
-    return rows.map((c) => ({
+    if ((count ?? 0) <= RETRIEVAL.smallDocumentThreshold) {
+      const { data: allChunks } = await client
+        .from('document_chunks')
+        .select('content, page_number')
+        .eq('document_id', docId)
+        .order('page_number', { ascending: true });
+
+      if (!allChunks) return [];
+      const rows = allChunks as Array<{ content: string; page_number: number }>;
+      return rows.map((c) => ({
+        content: c.content,
+        pageNumber: c.page_number ?? 1,
+        similarity: 0.95,
+        documentTitle: titleMap.get(docId),
+      }));
+    }
+
+    const { data: matchedChunks } = await client.rpc('match_document_chunks', {
+      query_embedding: queryVector,
+      match_threshold: RETRIEVAL.matchThreshold,
+      match_count: RETRIEVAL.topK,
+      filter_document_id: docId,
+    });
+
+    const matched = (matchedChunks ?? []) as ChunkRow[];
+    return matched.map((c) => ({
       content: c.content,
-      pageNumber: c.page_number ?? 1,
-      similarity: 0.95,
+      pageNumber: c.page_number ?? c.pageNumber ?? 1,
+      similarity: c.similarity ?? 0.8,
+      documentTitle: titleMap.get(docId),
     }));
   }
 
-  const queryVector = await generateEmbedding(queryForSearch);
+  // Multi-document: Balanced quota per document (fetched in parallel with Promise.all)
+  const perDocCount = Math.max(3, Math.ceil(RETRIEVAL.topK / docIds.length));
 
-  const { data: matchedChunks } = await client.rpc('match_document_chunks', {
-    query_embedding: queryVector,
-    match_threshold: RETRIEVAL.matchThreshold,
-    match_count: RETRIEVAL.topK,
-    filter_document_id: documentId,
+  const perDocPromises = docIds.map(async (docId) => {
+    const { count } = await client
+      .from('document_chunks')
+      .select('*', { count: 'exact', head: true })
+      .eq('document_id', docId);
+
+    // If document is small (e.g. certificates <= 15 chunks), include all chunks
+    if ((count ?? 0) <= 15) {
+      const { data: allChunks } = await client
+        .from('document_chunks')
+        .select('content, page_number')
+        .eq('document_id', docId)
+        .order('page_number', { ascending: true });
+
+      return ((allChunks ?? []) as Array<{ content: string; page_number: number }>).map((c) => ({
+        content: c.content,
+        pageNumber: c.page_number ?? 1,
+        similarity: 0.95,
+        documentTitle: titleMap.get(docId),
+      }));
+    }
+
+    // Otherwise, fetch top-K relevant chunks for this specific document
+    const { data: matchedChunks } = await client.rpc('match_document_chunks', {
+      query_embedding: queryVector,
+      match_threshold: RETRIEVAL.matchThreshold,
+      match_count: perDocCount,
+      filter_document_id: docId,
+    });
+
+    return ((matchedChunks ?? []) as ChunkRow[]).map((c) => ({
+      content: c.content,
+      pageNumber: c.page_number ?? c.pageNumber ?? 1,
+      similarity: c.similarity ?? 0.8,
+      documentTitle: titleMap.get(docId),
+    }));
   });
 
-  const { data: introChunks } = await client
-    .from('document_chunks')
-    .select('content, page_number')
-    .eq('document_id', documentId)
-    .order('page_number', { ascending: true })
-    .limit(RETRIEVAL.introPages);
+  const resultsByDoc = await Promise.all(perDocPromises);
+  const combinedResults: RetrievedChunk[] = [];
 
-  const matched = (matchedChunks ?? []) as ChunkRow[];
-  const intro = (introChunks ?? []) as Pick<ChunkRow, 'content' | 'page_number'>[];
-  const combined: ChunkRow[] = [...matched, ...intro];
-
-  const uniqueMap = new Map<string, ChunkRow>();
-  for (const item of combined) {
-    const key = item.id ?? item.content;
-    if (!uniqueMap.has(key)) {
-      uniqueMap.set(key, item);
-    }
+  for (const docResults of resultsByDoc) {
+    combinedResults.push(...docResults);
   }
 
-  return Array.from(uniqueMap.values()).map((c) => ({
-    content: c.content,
-    pageNumber: c.page_number ?? c.pageNumber ?? 1,
-    similarity: c.similarity ?? 0.8,
-  }));
+  return combinedResults;
+}
+
+async function fetchDocTitles(
+  client: typeof supabaseAdmin,
+  docIds: string[],
+): Promise<Map<string, string>> {
+  const { data: docs } = await client
+    .from('documents')
+    .select('id, title')
+    .in('id', docIds);
+
+  const map = new Map<string, string>();
+  for (const d of (docs ?? []) as Array<{ id: string; title: string | null }>) {
+    map.set(d.id, d.title ?? 'Unknown');
+  }
+  return map;
 }

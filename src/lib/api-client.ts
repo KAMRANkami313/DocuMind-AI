@@ -51,6 +51,7 @@ export async function uploadDocument(args: UploadDocumentArgs): Promise<UploadRe
 
 export interface StreamChatArgs {
   documentId: string;
+  documentIds?: string[];
   messages: ChatMessage[];
   onCitations: (citations: Citation[]) => void;
   onText: (text: string) => void;
@@ -63,6 +64,7 @@ export async function streamChat(args: StreamChatArgs): Promise<void> {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       documentId: args.documentId,
+      documentIds: args.documentIds,
       messages: args.messages,
     }),
     signal: args.signal,
@@ -96,6 +98,7 @@ export async function streamChat(args: StreamChatArgs): Promise<void> {
               pageNumber: c.pageNumber,
               excerpt: c.content,
               similarity: c.similarity,
+              documentTitle: c.documentTitle,
             })),
           );
         }
