@@ -1,6 +1,7 @@
 'use client';
 
 import * as React from 'react';
+import { PanelLeft } from 'lucide-react';
 import { AuthModal } from '@/components/auth/auth-modal';
 import { ChatInput } from '@/components/layout/chat-input';
 import { Header } from '@/components/layout/header';
@@ -26,20 +27,30 @@ export default function DocumentQAPage() {
   } = useChat();
 
   const [sidebarCollapsed, setSidebarCollapsed] = React.useState(false);
-  const previewDocId = attachedDocs[0]?.documentId;
-  const previewDocName = attachedDocs[0]?.documentName ?? activeSession?.title ?? '';
+  const [mobileSidebarOpen, setMobileSidebarOpen] = React.useState(false);
 
   return (
     <div className="flex h-screen overflow-hidden bg-bg font-sans text-fg antialiased">
       <div className={cn('hidden lg:flex transition-all duration-200', sidebarCollapsed && 'w-0 overflow-hidden')}>
-        <Sidebar
-          isCollapsed={sidebarCollapsed}
-          onToggleCollapse={() => setSidebarCollapsed(!sidebarCollapsed)}
-        />
+        {!sidebarCollapsed && (
+          <Sidebar onToggleCollapse={() => setSidebarCollapsed(true)} />
+        )}
       </div>
-      <MobileSidebar />
-      <main className="relative flex flex-1 flex-col bg-bg">
-        <Header onOpenPreview={() => setIsPreviewOpen(true)} />
+      {sidebarCollapsed && (
+        <button
+          onClick={() => setSidebarCollapsed(false)}
+          className="hidden lg:flex fixed left-3 top-3 z-40 h-9 w-9 items-center justify-center rounded-lg border border-border bg-surface text-fg-muted transition hover:bg-surface-2 cursor-pointer"
+          aria-label="Open sidebar"
+        >
+          <PanelLeft className="h-4 w-4" />
+        </button>
+      )}
+      <MobileSidebar isOpen={mobileSidebarOpen} onClose={() => setMobileSidebarOpen(false)} />
+      <main className="relative flex flex-1 flex-col bg-bg min-w-0">
+        <Header
+          onOpenPreview={() => setIsPreviewOpen(true)}
+          onOpenMobileSidebar={() => setMobileSidebarOpen(true)}
+        />
         <MessagesFeed />
         <ChatInput />
       </main>
@@ -48,8 +59,8 @@ export default function DocumentQAPage() {
       <PdfPreviewer
         isOpen={isPreviewOpen}
         onClose={() => setIsPreviewOpen(false)}
-        documentId={previewDocId}
-        fileName={previewDocName}
+        attachedDocs={attachedDocs}
+        sessionTitle={activeSession?.title ?? ''}
       />
     </div>
   );

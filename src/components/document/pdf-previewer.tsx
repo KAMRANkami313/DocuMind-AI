@@ -4,55 +4,49 @@ import * as React from 'react';
 import { FileText, Loader2, X } from 'lucide-react';
 import { Dialog } from '@/components/ui/dialog';
 import { loadDocumentContent, type DocumentPageContent } from '@/lib/api-client';
+import type { ChatSessionDocument } from '@/types';
 import { cn } from '@/lib/utils';
 
 interface PdfPreviewerProps {
   isOpen: boolean;
   onClose: () => void;
-  documentId?: string;
-  fileName: string;
-  fileBlobUrl?: string;
+  attachedDocs: ChatSessionDocument[];
+  sessionTitle: string;
 }
 
 export function PdfPreviewer({
   isOpen,
   onClose,
-  documentId,
-  fileName,
-  fileBlobUrl,
+  attachedDocs,
+  sessionTitle,
 }: PdfPreviewerProps) {
+  const [activeDocId, setActiveDocId] = React.useState<string | undefined>(undefined);
   const [pages, setPages] = React.useState<DocumentPageContent[]>([]);
   const [isLoading, setIsLoading] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
 
   React.useEffect(() => {
+    if (isOpen && attachedDocs.length > 0 && !activeDocId) {
+      setActiveDocId(attachedDocs[0]?.documentId);
+    }
     if (!isOpen) {
       setPages([]);
       setError(null);
-      return;
+      setActiveDocId(undefined);
     }
+  }, [isOpen, attachedDocs, activeDocId]);
 
-    if (fileBlobUrl) {
-      setPages([]);
-      setError(null);
-      setIsLoading(false);
-      return;
-    }
-
-    if (!documentId) {
-      setPages([]);
-      setError('No document selected.');
-      setIsLoading(false);
-      return;
-    }
+  React.useEffect(() => {
+    if (!isOpen || !activeDocId) return;
 
     let cancelled = false;
     setIsLoading(true);
     setError(null);
+    setPages([]);
 
     (async () => {
       try {
-        const content = await loadDocumentContent(documentId);
+        const content = await loadDocumentContent(activeDocId);
         if (cancelled) return;
         setPages(content.pages);
         setIsLoading(false);
@@ -64,10 +58,11 @@ export function PdfPreviewer({
       }
     })();
 
-    return () => {
-      cancelled = true;
-    };
-  }, [isOpen, documentId, fileBlobUrl]);
+    return () => { cancelled = true; };
+  }, [isOpen, activeDocId]);
+
+  const activeDoc = attachedDocs.find((d) => d.documentId === activeDocId);
+  const displayName = activeDoc?.documentName ?? sessionTitle;
 
   return (
     <Dialog
@@ -76,29 +71,42 @@ export function PdfPreviewer({
       className="w-full max-w-4xl h-[85vh] p-0 overflow-hidden"
       closeOnBackdrop
     >
-      <div className="flex h-14 items-center justify-between border-b border-border px-4 sm:px-5 bg-surface/60">
-        <div className="flex items-center gap-2.5 truncate">
+      <div className="flex h-14 items-center justify-between border-b border-border px-4 sm:px-5 bg-surface/60 shrink-0">
+        <div className="flex items-center gap-2.5 min-w-0 truncate">
           <FileText className="h-4 w-4 text-primary shrink-0" />
-          <span className="text-xs font-medium text-fg truncate">{fileName}</span>
+          <span className="text-xs font-medium text-fg truncate">{displayName}</span>
         </div>
         <button
           type="button"
           onClick={onClose}
-          className="p-1.5 text-fg-muted hover:text-fg rounded-lg hover:bg-surface-2 transition cursor-pointer"
+          className="p-1.5 text-fg-muted hover:text-fg rounded-lg hover:bg-surface-2 transition cursor-pointer shrink-0"
           aria-label="Close"
         >
           <X className="h-4 w-4" />
         </button>
       </div>
 
+      {attachedDocs.length > 1 && (
+        <div className="flex items-center gap-1 border-b border-border bg-surface-2 px-4 py-1.5 overflow-x-auto shrink-0">
+          {attachedDocs.map((doc) => (
+            <button
+              key={doc.documentId}
+              onClick={() => setActiveDocId(doc.documentId)}
+              className={cn(
+                'cursor-pointer whitespace-nowrap rounded-full px-2.5 py-1 text-[10px] font-medium transition',
+                doc.documentId === activeDocId
+                  ? 'bg-primary text-primary-fg'
+                  : 'bg-surface text-fg-muted hover:bg-surface-3 hover:text-fg',
+              )}
+            >
+              {doc.documentName.length > 20 ? doc.documentName.slice(0, 18) + '...' : doc.documentName}
+            </button>
+          ))}
+        </div>
+      )}
+
       <div className="flex-1 bg-bg overflow-y-auto p-4">
-        {fileBlobUrl ? (
-          <iframe
-            src={fileBlobUrl}
-            className="w-full h-full rounded-lg border border-border"
-            title={fileName}
-          />
-        ) : isLoading ? (
+        {isLoading ? (
           <div className="flex h-full flex-col items-center justify-center text-fg-muted text-sm gap-2">
             <Loader2 className="h-6 w-6 animate-spin text-primary" />
             <span>Loading document...</span>

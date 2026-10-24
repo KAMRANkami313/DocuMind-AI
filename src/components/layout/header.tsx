@@ -1,6 +1,6 @@
 'use client';
 
-import { Eye, MoreVertical, RotateCcw, Download, FileText } from 'lucide-react';
+import { Eye, MoreVertical, RotateCcw, Download, FileText, Menu } from 'lucide-react';
 import * as React from 'react';
 import { useChat } from '@/hooks/use-chat';
 import { ThemeToggle } from '@/components/theme/theme-toggle';
@@ -9,9 +9,10 @@ import { cn } from '@/lib/utils';
 
 interface HeaderProps {
   onOpenPreview: () => void;
+  onOpenMobileSidebar: () => void;
 }
 
-export function Header({ onOpenPreview }: HeaderProps) {
+export function Header({ onOpenPreview, onOpenMobileSidebar }: HeaderProps) {
   const { activeSession, clearActiveChat, messages, attachedDocs } = useChat();
   const [menuOpen, setMenuOpen] = React.useState(false);
   const [exportOpen, setExportOpen] = React.useState(false);
@@ -38,24 +39,31 @@ export function Header({ onOpenPreview }: HeaderProps) {
 
   return (
     <>
-      <header className="flex h-14 items-center justify-between border-b border-border bg-surface/60 px-4 backdrop-blur-sm sm:px-6">
-        <div className="flex items-center gap-2 text-xs min-w-0">
-          <span className="truncate max-w-40 sm:max-w-xs rounded-md border border-border bg-surface-2 px-2.5 py-1 font-medium text-fg">
-            {activeSession ? activeSession.title : 'No active chat'}
+      <header className="flex h-14 items-center justify-between border-b border-border bg-surface/60 px-3 sm:px-6 backdrop-blur-sm shrink-0">
+        <div className="flex items-center gap-2 min-w-0">
+          <button
+            onClick={onOpenMobileSidebar}
+            className="lg:hidden flex cursor-pointer items-center justify-center h-8 w-8 rounded-lg text-fg-muted transition hover:bg-surface-2"
+            aria-label="Open menu"
+          >
+            <Menu className="h-4 w-4" />
+          </button>
+          <span className="truncate max-w-25 sm:max-w-xs rounded-md border border-border bg-surface-2 px-2 py-1 text-xs font-medium text-fg">
+            {activeSession ? activeSession.title : 'New Chat'}
           </span>
           {attachedDocs.length > 0 && (
-            <span className="text-[10px] text-fg-subtle">({attachedDocs.length}/3 docs)</span>
+            <span className="hidden sm:inline text-[10px] text-fg-subtle shrink-0">({attachedDocs.length}/3)</span>
           )}
         </div>
-        <div className="flex items-center gap-2 sm:gap-3">
+        <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
           {activeSession && (
             <>
-              <div className="hidden sm:flex items-center gap-2">
-                <button onClick={onOpenPreview} className="flex cursor-pointer items-center gap-1.5 rounded-lg border border-border bg-surface px-3 py-1.5 text-xs text-fg-muted transition hover:bg-surface-2 hover:text-fg">
+              <div className="hidden sm:flex items-center gap-1.5">
+                <button onClick={onOpenPreview} className="flex cursor-pointer items-center gap-1 rounded-lg border border-border bg-surface px-2.5 py-1.5 text-xs text-fg-muted transition hover:bg-surface-2 hover:text-fg">
                   <Eye className="h-3.5 w-3.5 text-primary" /> View
                 </button>
                 <div className="relative" ref={exportRef}>
-                  <button onClick={() => setExportOpen(!exportOpen)} className="flex cursor-pointer items-center gap-1.5 rounded-lg border border-border bg-surface px-3 py-1.5 text-xs text-fg-muted transition hover:bg-surface-2 hover:text-fg">
+                  <button onClick={() => setExportOpen(!exportOpen)} className="flex cursor-pointer items-center gap-1 rounded-lg border border-border bg-surface px-2.5 py-1.5 text-xs text-fg-muted transition hover:bg-surface-2 hover:text-fg">
                     <Download className="h-3.5 w-3.5" /> Export
                   </button>
                   {exportOpen && (
@@ -65,7 +73,7 @@ export function Header({ onOpenPreview }: HeaderProps) {
                     </div>
                   )}
                 </div>
-                <button onClick={() => void clearActiveChat()} title="Clear chat" className="flex cursor-pointer items-center gap-1.5 rounded-lg border border-border bg-surface px-3 py-1.5 text-xs text-fg-muted transition hover:bg-surface-2 hover:text-danger">
+                <button onClick={() => void clearActiveChat()} title="Clear chat" className="flex cursor-pointer items-center gap-1 rounded-lg border border-border bg-surface px-2.5 py-1.5 text-xs text-fg-muted transition hover:bg-surface-2 hover:text-danger">
                   <RotateCcw className="h-3.5 w-3.5" /> Clear
                 </button>
               </div>
@@ -74,12 +82,12 @@ export function Header({ onOpenPreview }: HeaderProps) {
                   <MoreVertical className="h-4 w-4" />
                 </button>
                 {menuOpen && (
-                  <div className="absolute right-0 top-10 z-50 w-44 rounded-lg border border-border bg-surface shadow-elevated py-1">
+                  <div className="absolute right-0 top-10 z-50 w-40 rounded-lg border border-border bg-surface shadow-elevated py-1">
                     <button onClick={() => { setMenuOpen(false); onOpenPreview(); }} className="flex w-full cursor-pointer items-center gap-2 px-3 py-2 text-xs text-fg-muted hover:bg-surface-2 hover:text-fg">
                       <Eye className="h-3.5 w-3.5 text-primary" /> View Document
                     </button>
                     <button onClick={() => { setMenuOpen(false); handleExport('markdown'); }} className="flex w-full cursor-pointer items-center gap-2 px-3 py-2 text-xs text-fg-muted hover:bg-surface-2 hover:text-fg">
-                      <Download className="h-3.5 w-3.5" /> Export Markdown
+                      <Download className="h-3.5 w-3.5" /> Export MD
                     </button>
                     <button onClick={() => { setMenuOpen(false); handleExport('json'); }} className="flex w-full cursor-pointer items-center gap-2 px-3 py-2 text-xs text-fg-muted hover:bg-surface-2 hover:text-fg">
                       <Download className="h-3.5 w-3.5" /> Export JSON
@@ -97,11 +105,11 @@ export function Header({ onOpenPreview }: HeaderProps) {
         </div>
       </header>
       {attachedDocs.length > 0 && (
-        <div className="flex items-center gap-1.5 border-b border-border bg-surface/40 px-4 py-1.5 sm:px-6 overflow-x-auto">
+        <div className="flex items-center gap-1.5 border-b border-border bg-surface/40 px-3 sm:px-6 py-1.5 overflow-x-auto shrink-0">
           {attachedDocs.map((doc) => (
-            <span key={doc.documentId} className="inline-flex items-center gap-1 rounded-full border border-border bg-surface-2 px-2 py-0.5 text-[10px] text-fg-muted">
+            <span key={doc.documentId} className="inline-flex items-center gap-1 rounded-full border border-border bg-surface-2 px-2 py-0.5 text-[10px] text-fg-muted whitespace-nowrap shrink-0">
               <FileText className="h-3 w-3 text-primary" />
-              <span className="truncate max-w-32">{doc.documentName}</span>
+              <span className="truncate max-w-20 sm:max-w-32">{doc.documentName}</span>
             </span>
           ))}
         </div>

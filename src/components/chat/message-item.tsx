@@ -59,24 +59,28 @@ export function MessageItem({
   const [editText, setEditText] = React.useState(content);
   const [showSources, setShowSources] = React.useState(false);
 
-  let mainContent = content;
-  let suggestions: string[] = [];
+  const { mainContent, suggestions } = React.useMemo(() => {
+    let mc = content;
+    let sug: string[] = [];
 
-  if (!isUser && content.includes('<<<SUGGESTIONS>>>')) {
-    const parts = content.split('<<<SUGGESTIONS>>>');
-    const firstPart = parts[0];
-    const secondPart = parts[1];
+    if (!isUser && content.includes('<<<SUGGESTIONS>>>')) {
+      const parts = content.split('<<<SUGGESTIONS>>>');
+      const firstPart = parts[0];
+      const secondPart = parts[1];
 
-    if (firstPart !== undefined) {
-      mainContent = firstPart.trim();
+      if (firstPart !== undefined) {
+        mc = firstPart.trim();
+      }
+      if (secondPart !== undefined) {
+        sug = secondPart
+          .split('\n')
+          .map((s) => s.replace(/^[-*•\d.]\s*/, '').trim())
+          .filter((s) => s.length > 5);
+      }
     }
-    if (secondPart !== undefined) {
-      suggestions = secondPart
-        .split('\n')
-        .map((s) => s.replace(/^[-*•\d.]\s*/, '').trim())
-        .filter((s) => s.length > 5);
-    }
-  }
+
+    return { mainContent: mc, suggestions: sug };
+  }, [content, isUser]);
 
   const uniqueCitations = React.useMemo(() => {
     if (!citations || citations.length === 0) return [];

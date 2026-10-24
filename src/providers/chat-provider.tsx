@@ -6,7 +6,6 @@ import { useToastContext } from './toast-provider';
 import {
   streamChat,
   insertChatMessage,
-  loadChatMessages,
   deleteChatMessage,
   clearChatMessages,
   listChatSessions,
@@ -25,6 +24,7 @@ import type {
   DocumentMeta,
 } from '@/types';
 import { MAX_DOCUMENTS_PER_CHAT } from '@/lib/constants';
+import { generateId } from '@/lib/utils';
 
 interface ChatContextValue {
   sessions: ChatSession[];
@@ -155,6 +155,15 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
     if (activeSession && messages.length === 0 && attachedDocs.length === 0) {
       return;
     }
+    if (!user) {
+      const guestId = generateId('guest-session');
+      const newSess: ChatSession = { id: guestId, title: 'New Chat', createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
+      setSessions((prev) => [newSess, ...prev]);
+      setActiveSessionId(guestId);
+      setMessages([]);
+      setAttachedDocs([]);
+      return;
+    }
     try {
       const newSess = await createChatSession();
       setSessions((prev) => [{ id: newSess.id, title: newSess.title, createdAt: newSess.createdAt, updatedAt: newSess.updatedAt }, ...prev]);
@@ -165,7 +174,7 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
       const message = err instanceof Error ? err.message : 'Unknown error';
       showError('Failed to create chat', message);
     }
-  }, [activeSession, messages, attachedDocs, showError]);
+  }, [activeSession, messages, attachedDocs, user, showError]);
 
   const selectChat = React.useCallback((sessionId: string) => {
     setActiveSessionId(sessionId);
@@ -178,24 +187,28 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
     if (activeSessionId === sessionId) {
       setActiveSessionId(updated.length > 0 ? updated[0]!.id : null);
     }
-    try {
-      await deleteChatSession(sessionId);
-    } catch (err) {
-      const message = err instanceof Error ? err.message : 'Unknown error';
-      showError('Failed to delete chat', message);
+    if (user) {
+      try {
+        await deleteChatSession(sessionId);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'Unknown error';
+        showError('Failed to delete chat', message);
+      }
     }
     showSuccess('Chat deleted', target ? `"${target.title}" was removed.` : undefined);
-  }, [sessions, activeSessionId, showError, showSuccess]);
+  }, [sessions, activeSessionId, user, showError, showSuccess]);
 
   const renameChat = React.useCallback(async (sessionId: string, title: string) => {
     setSessions((prev) => prev.map((s) => (s.id === sessionId ? { ...s, title } : s)));
-    try {
-      await renameChatSession(sessionId, title);
-    } catch (err) {
-      const message = err instanceof Error ? err.message : 'Unknown error';
-      showError('Failed to rename chat', message);
+    if (user) {
+      try {
+        await renameChatSession(sessionId, title);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'Unknown error';
+        showError('Failed to rename chat', message);
+      }
     }
-  }, [showError]);
+  }, [user, showError]);
 
   const attachDocument = React.useCallback(async (documentId: string, documentName: string) => {
     if (!activeSessionId) return;
@@ -204,15 +217,25 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
       return;
     }
     if (attachedDocs.some((d) => d.documentId === documentId)) return;
-    try {
-      await attachDocumentToSession(activeSessionId, documentId);
-      setAttachedDocs((prev) => [...prev, { documentId, documentName }]);
-      showSuccess('Document attached', `"${documentName}" added to this chat.`);
-    } catch (err) {
-      const message = err instanceof Error ? err.message : 'Unknown error';
-      showError('Failed to attach document', message);
+    setAttachedDocs((prev) => [...prev, { documentId, documentName }]);
+    if (attachedDocs.length === 0) {
+      setSessions((prev) => prev.map((s) => (s.id === activeSessionId ? { ...s, title: documentName, updatedAt: new Date().toISOString() } : s)));
+      if (user) {
+        try { await renameChatSession(activeSessionId, documentName); } catch { /* best-effort */ }
+      }
     }
-  }, [activeSessionId, attachedDocs, showError, showSuccess]);
+    if (user) {
+      try {
+        await attachDocumentToSession(activeSessionId, documentId);
+        showSuccess('Document attached', `"${documentName}" added to this chat.`);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'Unknown error';
+        showError('Failed to attach document', message);
+      }
+    } else {
+      showSuccess('Document attached', `"${documentName}" added to this chat.`);
+    }
+  }, [activeSessionId, attachedDocs, user, showError, showSuccess]);
 
   const uploadAndAttachDocument = React.useCallback(async (file: File) => {
     if (!activeSessionId) return;
@@ -222,9 +245,17 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
     }
     try {
       const result = await uploadDocument({ file, userId: user?.id });
-      await attachDocumentToSession(activeSessionId, result.documentId);
+      if (user) {
+        await attachDocumentToSession(activeSessionId, result.documentId);
+      }
       setAttachedDocs((prev) => [...prev, { documentId: result.documentId, documentName: result.fileName }]);
       setDocuments((prev) => [{ id: result.documentId, name: result.fileName }, ...prev.filter((d) => d.id !== result.documentId)]);
+      if (attachedDocs.length === 0) {
+        setSessions((prev) => prev.map((s) => (s.id === activeSessionId ? { ...s, title: result.fileName, updatedAt: new Date().toISOString() } : s)));
+        if (user) {
+          try { await renameChatSession(activeSessionId, result.fileName); } catch { /* best-effort */ }
+        }
+      }
       showSuccess('Document uploaded', `"${result.fileName}" attached to this chat.`);
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Unknown error';
@@ -339,14 +370,14 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
     if (!lastUser) return;
     const truncated = messages.slice(0, lastUserIdx);
     const messagesToSend = [...truncated, { role: 'user' as const, content: lastUser.content }];
-    if (lastAssistant.id) {
+    if (lastAssistant.id && user) {
       try { await deleteChatMessage(activeSessionId, lastAssistant.id); } catch (err) {
         const message = err instanceof Error ? err.message : 'Unknown error';
         showError('Failed to regenerate', message); return;
       }
     }
     await sendChatRequest(messagesToSend);
-  }, [activeSessionId, isLoading, messages, sendChatRequest, showError]);
+  }, [activeSessionId, isLoading, messages, sendChatRequest, showError, user]);
 
   const handleInPlaceEdit = React.useCallback(async (index: number, newText: string) => {
     if (!activeSessionId || isLoading) return;
