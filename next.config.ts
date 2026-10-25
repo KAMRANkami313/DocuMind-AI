@@ -29,6 +29,12 @@ const nextConfig: NextConfig = {
     'xlsx',
     'unpdf',
     'pdfjs-dist',
+    // ⚠️ Used for per-page PDF rendering in the OCR fallback path.
+    // @napi-rs/canvas ships prebuilt native binaries (no system deps),
+    // but it must be in serverExternalPackages so Vercel includes the
+    // .node native binding in the function bundle instead of trying to
+    // bundle it as JS (which fails on the `require(crypto)` shim).
+    '@napi-rs/canvas',
   ],
   outputFileTracingIncludes: {
     '/api/upload': [
@@ -38,6 +44,7 @@ const nextConfig: NextConfig = {
       './node_modules/tesseract.js/**/*',
       './node_modules/mammoth/**/*',
       './node_modules/xlsx/**/*',
+      './node_modules/@napi-rs/canvas/**/*',
     ],
     '/api/chat': [
       './.transformers-cache/**/*',

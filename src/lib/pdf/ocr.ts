@@ -58,18 +58,34 @@ async function getWorker(): Promise<TesseractWorker> {
 /**
  * Run OCR on a single image buffer (PNG / JPG / WEBP / GIF).
  * Returns the recognized text trimmed; empty string if nothing was found.
+ *
+ * Accepts an ArrayBuffer or a Uint8Array (Node Buffer is a Uint8Array).
+ *
+ * ⚠️ We make a defensive COPY of the input before passing it to tesseract.js
+ * because tesseract.js transfers the ArrayBuffer to its worker thread,
+ * detaching the original. Without a copy, the caller's buffer becomes
+ * unusable after this call returns, and any subsequent consumer (e.g. the
+ * next page's OCR, or @napi-rs/canvas's underlying buffer pool) crashes
+ * with "Cannot perform Construct on a detached ArrayBuffer".
  */
 export async function ocrImageBuffer(
-  buffer: ArrayBuffer,
+  buffer: ArrayBuffer | Uint8Array,
   onProgress?: (info: { status: string; progress: number }) => void,
 ): Promise<{ text: string; confidence: number }> {
   const worker = await getWorker();
   try {
-    const result = await worker.recognize(
-      new Uint8Array(buffer),
-      {},
-      onProgress,
-    );
+    // Defensive copy — always a fresh ArrayBuffer that tesseract.js is
+    // free to detach without breaking any other consumer.
+    let input: Uint8Array;
+    if (buffer instanceof ArrayBuffer) {
+      input = new Uint8Array(buffer.slice(0));
+    } else {
+      // Uint8Array view — copy bytes into a new ArrayBuffer.
+      const copy = new Uint8Array(buffer.byteLength);
+      copy.set(buffer);
+      input = copy;
+    }
+    const result = await worker.recognize(input, {}, onProgress);
     const text = (result.data?.text ?? '').trim();
     const confidence = result.data?.confidence ?? 0;
     return { text, confidence };
@@ -102,33 +118,132 @@ export function looksScanned(
 }
 
 /**
- * Run OCR on each page of a PDF buffer sequentially. Tesseract.js v5 can
- * accept a PDF buffer directly when the underlying pdfjs worker is
- * available — but this is flaky on Vercel serverless because the canvas
- * backend needs node-canvas. As a robust fallback, we OCR the whole PDF
- * as a single image and return one big text blob with page breaks.
+ * ⚠️ Per-page OCR fallback for PDFs that have sparse text on certain
+ * pages (e.g., slide decks where each slide has a title at the top and
+ * a terminal screenshot below — the screenshot's text is invisible to
+ * unpdf's text extraction).
  *
- * For the hobby-tier Vercel use case, this is good enough — users with
- * heavy scanned-PDF workflows are encouraged to use a separate
- * pre-processing step (e.g. Adobe Acrobat → "Recognize Text") before
- * uploading.
+ * This function:
+ *   1. Gets the pdfjs document proxy via unpdf.getDocumentProxy
+ *   2. Iterates pages 1..N
+ *   3. For each page: extracts text content directly via page.getTextContent()
+ *   4. If the text is sparse (< threshold), renders the page to a PNG
+ *      using unpdf.renderPageAsImage (which uses @napi-rs/canvas internally),
+ *      then OCRs the PNG with tesseract.js
+ *   5. Merges: keeps whatever unpdf text exists, appends OCR text for the
+ *      portions unpdf couldn't see (e.g. terminal screenshots embedded
+ *      inside slides)
+ *
+ * Returns an array of { pageNumber, text } — one entry per page that
+ * has any text (either from unpdf OR from OCR). Pages with neither are
+ * omitted (the chunker would skip them anyway).
  */
-export async function ocrPdfBuffer(
+export async function ocrPdfPerPage(
   buffer: ArrayBuffer,
+  options: {
+    /** Per-page text from unpdf (used to skip pages where unpdf already
+     * extracted enough text). Optional — if omitted, we extract text
+     * directly via pdfjs per-page. */
+    unpdfPages?: Array<{ pageNumber: number; text: string }>;
+    /** Render scale for canvas. Higher = better OCR accuracy, slower.
+     * Default: 2.0 (good balance for ~12pt text). */
+    renderScale?: number;
+  } = {},
 ): Promise<Array<{ pageNumber: number; text: string }>> {
-  const worker = await getWorker();
-  try {
-    // Tesseract.js v5 can recognize PDF files directly (it uses pdfjs-dist
-    // internally to render pages). If this fails, we fall back to a single
-    // page-1 OCR (which usually returns at least the cover page).
-    const result = await worker.recognize(new Uint8Array(buffer));
-    const text = (result.data?.text ?? '').trim();
-    if (text.length === 0) return [];
-    return [{ pageNumber: 1, text }];
-  } catch {
-    // Final fallback: signal that OCR could not run. The upload route
-    // will treat this as "no text found" and the document will have zero
-    // chunks — the chat will then politely refuse to answer.
-    return [];
+  const renderScale = options.renderScale ?? 2.0;
+  const unpdfTextByPage = new Map<number, string>();
+  if (options.unpdfPages) {
+    for (const p of options.unpdfPages) {
+      if (p.text.trim().length > 0) unpdfTextByPage.set(p.pageNumber, p.text);
+    }
   }
+
+  // Dynamic imports — keep heavy native deps out of the bundle when
+  // OCR fallback is never triggered (text-based PDFs).
+  const unpdfMod = await import('unpdf');
+  const { getDocumentProxy, renderPageAsImage } = unpdfMod;
+
+  // ⚠️ Defensive copy: pdfjs's getDocument transfers the ArrayBuffer to
+  // its worker thread, detaching the original. We slice the bytes into a
+  // fresh ArrayBuffer so the upstream caller's buffer is not corrupted.
+  // Without this, the second pass through extractPagesFromPdf (or any
+  // subsequent reader of the upload's buffer) crashes with
+  // "Cannot perform Construct on a detached ArrayBuffer".
+  const bufferCopy = buffer.slice(0);
+  const pdf = await getDocumentProxy(new Uint8Array(bufferCopy));
+  const numPages = pdf.numPages;
+  const out: Array<{ pageNumber: number; text: string }> = [];
+
+  for (let i = 1; i <= numPages; i++) {
+    // 1. Get this page's text content directly (per-page, not the
+    // whole-document blob unpdf.extractText gives us).
+    let pageText = unpdfTextByPage.get(i) ?? '';
+    if (!pageText) {
+      try {
+        const pageProxy = await pdf.getPage(i);
+        const textContent = await pageProxy.getTextContent();
+        pageText = textContent.items
+          .map((item: unknown) => {
+            if (item && typeof item === 'object' && 'str' in item) {
+              const str = (item as { str: unknown }).str;
+              return typeof str === 'string' ? str : '';
+            }
+            return '';
+          })
+          .join(' ')
+          .trim();
+      } catch {
+        // ignore — will rely on OCR fallback
+      }
+    }
+
+    // 2. If the page has substantive text, skip OCR (text layer is good).
+    if (pageText.length >= RETRIEVAL.scannedPdfTextThreshold) {
+      out.push({ pageNumber: i, text: pageText });
+      continue;
+    }
+
+    // 3. Sparse text → render this page to a PNG and OCR it.
+    //    unpdf.renderPageAsImage uses @napi-rs/canvas internally to
+    //    render the page at the requested scale and returns a PNG
+    //    ArrayBuffer directly. We MUST pass `canvasImport` so unpdf
+    //    knows how to load @napi-rs/canvas in a Node.js environment
+    //    (without it, unpdf throws "Parameter 'canvasImport' is required
+    //    in Node.js environment").
+    try {
+      const pngBuffer = await renderPageAsImage(pdf, i, {
+        scale: renderScale,
+        canvasImport: async () => await import('@napi-rs/canvas'),
+      });
+      const { text: ocrText, confidence } = await ocrImageBuffer(pngBuffer);
+
+      // Merge: keep whatever existing text we have, append OCR text
+      // (separated by double newline so the chunker can split naturally).
+      // If OCR returned nothing, fall through to push pageText only.
+      if (ocrText && ocrText.length > 0) {
+        const merged = [pageText, ocrText]
+          .filter((s) => s.length > 0)
+          .join('\n\n');
+        out.push({ pageNumber: i, text: merged });
+        if (confidence < 60) {
+          console.warn(
+            `[ocr] Page ${i} low confidence (${confidence.toFixed(0)}%) — text may be inaccurate`,
+          );
+        }
+      } else if (pageText.length > 0) {
+        out.push({ pageNumber: i, text: pageText });
+      }
+      // If both unpdf text AND OCR returned nothing, skip the page entirely.
+    } catch (err) {
+      // Render/OCR failure for this page — keep whatever text we have,
+      // log the error so it's debuggable.
+      const message = err instanceof Error ? err.message : String(err);
+      console.warn(`[ocr] Page ${i} render/OCR failed:`, message);
+      if (pageText.length > 0) {
+        out.push({ pageNumber: i, text: pageText });
+      }
+    }
+  }
+
+  return out;
 }

@@ -10,22 +10,76 @@
 // We use `Xenova/ms-marco-MiniLM-L-6-v2`, a small (~25MB) cross-encoder
 // fine-tuned on MS MARCO passage ranking. Output is a single sigmoid
 // probability that the chunk is relevant to the query.
+//
+// ⚠️ IMPORTANT IMPLEMENTATION DETAIL:
+// Xenova v2's TextClassificationPipeline._call(texts, {topk}) destructures
+// ONLY `topk` from options and IGNORES other options like `text_pair`.
+// It then calls `tokenizer(texts, {padding, truncation})` — passing the
+// pair object directly as `text`. The tokenizer's `_encode_text` then
+// calls `text.split(this.added_tokens_regex)`, but `text` is an object,
+// not a string → crash with `text.split is not a function`.
+//
+// To avoid this, we BYPASS the pipeline's high-level `_call` and instead
+// invoke the pipeline's `tokenizer` + `model` directly with the correct
+// pair-input format: `tokenizer(query, { text_pair: chunk, padding: true,
+// truncation: true })`. This is the documented Xenova cross-encoder
+// pattern that DOES work.
 
-import { pipeline, env, type TextClassificationPipeline } from '@xenova/transformers';
+import { pipeline, env } from '@xenova/transformers';
 import { RERANKER } from '@/lib/constants';
 
 env.cacheDir = './.transformers-cache';
 
-let rerankerPipeline: TextClassificationPipeline | null = null;
+interface TokenizerInput {
+  input_ids: number[];
+  attention_mask: number[];
+  token_type_ids?: number[];
+}
 
-async function getPipeline(): Promise<TextClassificationPipeline> {
-  if (!rerankerPipeline) {
-    rerankerPipeline = (await pipeline(
-      'text-classification',
-      RERANKER.model,
-    )) as TextClassificationPipeline;
+interface Tokenizer {
+  _call: (
+    text: string,
+    options: {
+      text_pair?: string;
+      padding?: boolean;
+      truncation?: boolean;
+      add_special_tokens?: boolean;
+    },
+  ) => TokenizerInput;
+}
+
+interface ModelConfig {
+  id2label: Record<string, string>;
+  problem_type?: string;
+}
+
+interface ModelOutput {
+  logits: { data: Float32Array | number[]; dims: number[] } | { data: number[]; toNumber: () => number };
+}
+
+interface Model {
+  _call: (inputs: TokenizerInput) => Promise<ModelOutput>;
+  config: ModelConfig;
+}
+
+interface PipelineInternals {
+  tokenizer: Tokenizer;
+  model: Model;
+}
+
+let pipelinePromise: Promise<unknown> | null = null;
+
+async function getPipeline(): Promise<PipelineInternals> {
+  if (!pipelinePromise) {
+    pipelinePromise = (async () => {
+      const pipe = (await pipeline(
+        'text-classification',
+        RERANKER.model,
+      )) as unknown as PipelineInternals;
+      return pipe;
+    })();
   }
-  return rerankerPipeline;
+  return (await pipelinePromise) as PipelineInternals;
 }
 
 export interface RerankerCandidate {
@@ -38,9 +92,21 @@ export interface RerankerCandidate {
   score: number;
 }
 
-interface RerankPairInput {
-  text: string;
-  text_pair: string;
+/**
+ * Apply softmax to a raw logit array. ms-marco-MiniLM-L-6-v2 is a
+ * single-label classifier (problem_type = 'single_label_classification')
+ * so the output is a probability distribution over labels.
+ */
+function softmax(logits: number[]): number[] {
+  if (logits.length === 0) return [];
+  const maxLogit = Math.max(...logits);
+  const exps = logits.map((x) => Math.exp(x - maxLogit));
+  const sum = exps.reduce((a, b) => a + b, 0);
+  return exps.map((e) => e / sum);
+}
+
+function sigmoid(x: number): number {
+  return 1 / (1 + Math.exp(-x));
 }
 
 /**
@@ -66,54 +132,85 @@ export async function rerankCandidates(
   try {
     const pipe = await getPipeline();
 
-    // Build (query, chunk) pair inputs for the cross-encoder
-    const pairs: RerankPairInput[] = pool.map((c) => ({
-      text: query,
-      text_pair: c.content.slice(0, 512), // ms-marco-MiniLM max input is 512 tokens
-    }));
+    // ⚠️ Per-pair inference. We bypass the pipeline's `_call` method
+    // (which strips text_pair from options) and instead invoke the
+    // pipeline's tokenizer + model directly with the correct pair-input
+    // format. Promise.all lets the event loop interleave; the onnxruntime
+    // inference itself is sequential per worker, so this is effectively
+    // sequential — but the await boundaries let other async work (like
+    // HTTP request handling) progress between inferences.
+    const scoredPromises = pool.map(async (c) => {
+      // Truncate the chunk content to 512 chars (ms-marco-MiniLM max
+      // input is 512 tokens, ~512 chars for English).
+      const truncatedChunk = c.content.slice(0, 512);
 
-    // The Xenova type defs for TextClassificationPipeline only declare
-    // `string | string[]`, but the implementation accepts pair objects
-    // ({ text, text_pair }) for cross-encoder models. Cast to unknown
-    // first, then to the expected pair-input type, to bypass the
-    // type-checker — this is the documented Xenova cross-encoder pattern.
-    type PairInput = { text: string; text_pair: string };
-    const pairInputs = pairs as unknown as PairInput[];
+      // Tokenize the (query, chunk) pair — text_pair goes in OPTIONS,
+      // not as a property of the input object. This is the key fix.
+      const inputs = pipe.tokenizer._call(query, {
+        text_pair: truncatedChunk,
+        padding: true,
+        truncation: true,
+        add_special_tokens: true,
+      });
 
-    // Use a force-cast on the pipeline call to bypass the
-    // (string | string[]) type signature.
-    const pipeAsAny = pipe as unknown as (
-      input: PairInput[] | PairInput,
-      options?: { topk: null | number },
-    ) => Promise<unknown>;
-    const rawOutput = await pipeAsAny(pairInputs, { topk: null });
-    const outputs = rawOutput as Array<
-      Array<{ label: string; score: number }> | { label: string; score: number }
-    >;
+      // Run the cross-encoder model
+      const output = await pipe.model._call(inputs);
 
-    // ms-marco-MiniLM-L-6-v2 outputs a single label "entailment" (or
-    // similar) with a sigmoid probability. Take that as the relevance
-    // score. Some versions output [{label: 'LABEL_0'}, {label: 'LABEL_1'}];
-    // in that case LABEL_1 is the "relevant" label.
-    const scored: RerankerCandidate[] = pool.map((c, i) => {
-      const out = outputs[i]!;
-      let score = 0.5;
-      if (Array.isArray(out)) {
-        if (out.length >= 2) {
-          const relevant = out.find((o) => o.label === 'LABEL_1' || o.label === 'entailment');
-          score = relevant?.score ?? out[1]!.score;
-        } else if (out.length === 1) {
-          score = out[0]!.score;
-        }
-      } else if (out && typeof out === 'object' && 'score' in out) {
-        score = (out as { score: number }).score;
+      // Extract logits (a 1D tensor of size = num_labels, typically 2)
+      const logitsData =
+        (output.logits as { data: Float32Array | number[] }).data ??
+        (output.logits as unknown as number[]);
+      const logits = Array.from(logitsData);
+
+      // Apply softmax or sigmoid depending on the model's problem_type.
+      // ms-marco-MiniLM-L-6-v2 is single_label_classification → softmax.
+      const problemType = pipe.model.config.problem_type;
+      const id2label = pipe.model.config.id2label ?? { 0: 'LABEL_0', 1: 'LABEL_1' };
+
+      let scores: number[];
+      if (problemType === 'multi_label_classification') {
+        scores = logits.map(sigmoid);
+      } else {
+        scores = softmax(logits);
       }
+
+      // Pick the "relevant" label. ms-marco-MiniLM-L-6-v2's id2label is
+      // { 0: 'LABEL_0', 1: 'LABEL_1' } where LABEL_1 (index 1) is the
+      // "relevant" class. Take the highest non-LABEL_0 score, or fall
+      // back to the highest score overall.
+      let bestScore = 0.5;
+      let bestIdx = -1;
+      let bestValue = -Infinity;
+      for (let i = 0; i < scores.length; i++) {
+        const label = id2label[String(i)] ?? `LABEL_${i}`;
+        // Prefer 'LABEL_1' / 'entailment' / 'MATCH' as the relevant label
+        const isRelevantLabel =
+          label === 'LABEL_1' ||
+          label === 'entailment' ||
+          label === 'MATCH' ||
+          label === 'yes';
+        if (isRelevantLabel) {
+          bestScore = scores[i]!;
+          break;
+        }
+        if (scores[i]! > bestValue) {
+          bestValue = scores[i]!;
+          bestIdx = i;
+        }
+      }
+      if (bestIdx >= 0 && bestScore === 0.5) {
+        // No explicit "relevant" label found — take the max score
+        bestScore = bestValue;
+      }
+
       return {
         originalIndex: c.originalIndex,
         content: c.content,
-        score,
+        score: bestScore,
       };
     });
+
+    const scored = await Promise.all(scoredPromises);
 
     scored.sort((a, b) => b.score - a.score);
     return scored.slice(0, RERANKER.finalK);
