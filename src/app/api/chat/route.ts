@@ -14,9 +14,17 @@ import {
   toAppError,
   appErrorToResponse,
 } from '@/lib/errors';
-import { RATE_LIMIT, RETRIEVAL, LLM } from '@/lib/constants';
+import { RATE_LIMIT, RETRIEVAL, LLM, HYBRID_SEARCH } from '@/lib/constants';
+import {
+  buildBm25Index,
+  bm25Search,
+  normalizeBm25Scores,
+} from '@/lib/ai/bm25';
+import { rerankCandidates } from '@/lib/ai/reranker';
 
-export const maxDuration = 30;
+// ⚠️ Bumped from 30s to 60s to accommodate hybrid search + cross-encoder
+// re-ranking on slow cold starts.
+export const maxDuration = 60;
 
 interface ChunkRow {
   id?: string;
@@ -24,6 +32,7 @@ interface ChunkRow {
   page_number?: number;
   pageNumber?: number;
   similarity?: number;
+  document_id?: string;
 }
 
 interface RetrievedChunk {
@@ -127,6 +136,13 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    // ⚡ Hybrid retrieval + cross-encoder re-ranking
+    // 1. Fetch a candidate pool from Postgres vector search (top-20 per doc)
+    // 2. Build BM25 index over the candidate pool, score against query
+    // 3. Fuse BM25 (normalized to [0,1]) and vector similarity scores
+    //    with HYBRID_SEARCH weights (default: 0.4 BM25 + 0.6 vector)
+    // 4. Cross-encoder re-rank top-10 of the fused list
+    // 5. Return top-6 chunks as LLM context
     const context = await retrieveContext(queryClient, allDocIds, queryForSearch);
 
     const systemPrompt = buildSystemPrompt(docTitle, context);
@@ -186,6 +202,23 @@ export async function POST(req: NextRequest) {
   }
 }
 
+/**
+ * ⚡ Hybrid retrieval pipeline (vector + BM25 + cross-encoder re-ranking).
+ *
+ * Strategy:
+ *   1. For very small documents (<= RETRIEVAL.smallDocumentThreshold chunks):
+ *      skip search entirely — return all chunks (LLM can handle it).
+ *   2. Otherwise fetch a candidate pool via Supabase RPC
+ *      `match_document_chunks` (vector cosine similarity). Per-doc
+ *      balanced quota (top-20 per doc, capped at hybridCandidatePool).
+ *   3. Build a BM25 index over the candidate pool and search with
+ *      the user's query.
+ *   4. Min-max normalize BM25 scores, fuse with vector scores using
+ *      HYBRID_SEARCH weights (default 0.4 BM25 + 0.6 vector).
+ *   5. Pass the fused top-10 through the cross-encoder (ms-marco-MiniLM-L-6-v2)
+ *      for fine-grained re-ranking.
+ *   6. Return the top-6 chunks (RERANKER.finalK) as LLM context.
+ */
 async function retrieveContext(
   client: typeof supabaseAdmin,
   docIds: string[],
@@ -203,6 +236,8 @@ async function retrieveContext(
       .eq('document_id', docId);
 
     if ((count ?? 0) <= RETRIEVAL.smallDocumentThreshold) {
+      // Very small doc (e.g. certificates, single-page images) — skip
+      // search entirely, give the LLM all chunks.
       const { data: allChunks } = await client
         .from('document_chunks')
         .select('content, page_number')
@@ -219,24 +254,26 @@ async function retrieveContext(
       }));
     }
 
+    // Fetch a larger candidate pool than RETRIEVAL.topK so BM25 + re-rank
+    // have material to work with.
+    const candidatePool = Math.max(RETRIEVAL.hybridCandidatePool, RETRIEVAL.topK);
     const { data: matchedChunks } = await client.rpc('match_document_chunks', {
       query_embedding: queryVector,
       match_threshold: RETRIEVAL.matchThreshold,
-      match_count: RETRIEVAL.topK,
+      match_count: candidatePool,
       filter_document_id: docId,
     });
 
     const matched = (matchedChunks ?? []) as ChunkRow[];
-    return matched.map((c) => ({
-      content: c.content,
-      pageNumber: c.page_number ?? c.pageNumber ?? 1,
-      similarity: c.similarity ?? 0.8,
-      documentTitle: titleMap.get(docId),
-    }));
+    return fuseAndRerank(matched, queryForSearch, titleMap, docId);
   }
 
-  // Multi-document: Balanced quota per document (fetched in parallel with Promise.all)
-  const perDocCount = Math.max(3, Math.ceil(RETRIEVAL.topK / docIds.length));
+  // Multi-document: fetch top-N candidates per document in parallel,
+  // then fuse + re-rank across the combined pool.
+  const perDocPool = Math.max(
+    3,
+    Math.ceil(RETRIEVAL.hybridCandidatePool / docIds.length),
+  );
 
   const perDocPromises = docIds.map(async (docId) => {
     const { count } = await client
@@ -244,7 +281,7 @@ async function retrieveContext(
       .select('*', { count: 'exact', head: true })
       .eq('document_id', docId);
 
-    // If document is small (e.g. certificates <= 15 chunks), include all chunks
+    // Small docs (<= 15 chunks) → include all chunks; they'll be fused + re-ranked
     if ((count ?? 0) <= 15) {
       const { data: allChunks } = await client
         .from('document_chunks')
@@ -254,36 +291,166 @@ async function retrieveContext(
 
       return ((allChunks ?? []) as Array<{ content: string; page_number: number }>).map((c) => ({
         content: c.content,
-        pageNumber: c.page_number ?? 1,
+        page_number: c.page_number ?? 1,
         similarity: 0.95,
-        documentTitle: titleMap.get(docId),
+        document_id: docId,
       }));
     }
 
-    // Otherwise, fetch top-K relevant chunks for this specific document
     const { data: matchedChunks } = await client.rpc('match_document_chunks', {
       query_embedding: queryVector,
       match_threshold: RETRIEVAL.matchThreshold,
-      match_count: perDocCount,
+      match_count: perDocPool,
       filter_document_id: docId,
     });
 
     return ((matchedChunks ?? []) as ChunkRow[]).map((c) => ({
       content: c.content,
-      pageNumber: c.page_number ?? c.pageNumber ?? 1,
+      page_number: c.page_number ?? c.pageNumber ?? 1,
       similarity: c.similarity ?? 0.8,
-      documentTitle: titleMap.get(docId),
+      document_id: docId,
     }));
   });
 
   const resultsByDoc = await Promise.all(perDocPromises);
-  const combinedResults: RetrievedChunk[] = [];
-
+  const combined: Array<{
+    content: string;
+    page_number: number;
+    similarity: number;
+    document_id: string;
+  }> = [];
   for (const docResults of resultsByDoc) {
-    combinedResults.push(...docResults);
+    combined.push(...docResults);
   }
 
-  return combinedResults;
+  return fuseAndRerankMultiDoc(combined, queryForSearch, titleMap);
+}
+
+/**
+ * Fuse BM25 + vector scores for a single document, then re-rank with the
+ * cross-encoder. Returns top RERANKER.finalK chunks.
+ */
+async function fuseAndRerank(
+  matched: ChunkRow[],
+  query: string,
+  titleMap: Map<string, string>,
+  docId: string,
+): Promise<RetrievedChunk[]> {
+  if (matched.length === 0) return [];
+
+  // Build BM25 index over the candidate pool
+  const indexEntries = matched.map((c, i) => ({
+    id: `chunk_${i}`,
+    content: c.content,
+    originalIndex: i,
+  }));
+  const bm25Index = buildBm25Index(indexEntries);
+  const bm25Results = bm25Search(bm25Index, query, matched.length);
+  const bm25Normalized = normalizeBm25Scores(bm25Results);
+  const bm25ByIndex = new Map<number, number>();
+  for (const r of bm25Normalized) bm25ByIndex.set(r.originalIndex, r.score);
+
+  // Fuse: combined_score = w_bm25 * bm25_norm + w_vector * vector_sim
+  const fused = matched.map((c, i) => {
+    const vectorSim = c.similarity ?? 0.5;
+    const bm25Score = bm25ByIndex.get(i) ?? 0;
+    const fusedScore =
+      HYBRID_SEARCH.bm25Weight * bm25Score +
+      HYBRID_SEARCH.vectorWeight * vectorSim;
+    return {
+      originalIndex: i,
+      content: c.content,
+      pageNumber: c.page_number ?? c.pageNumber ?? 1,
+      documentTitle: titleMap.get(docId),
+      fusedScore,
+      vectorSim,
+    };
+  });
+
+  // Sort by fused score descending, take top-N for re-rank
+  fused.sort((a, b) => b.fusedScore - a.fusedScore);
+  const topForRerank = fused.slice(0, 10);
+
+  // Cross-encoder re-rank
+  const rerankInput = topForRerank.map((r) => ({
+    originalIndex: r.originalIndex,
+    content: r.content,
+  }));
+  const reranked = await rerankCandidates(query, rerankInput);
+
+  // Map back to RetrievedChunk
+  return reranked.map((r) => {
+    const original = fused.find((f) => f.originalIndex === r.originalIndex)!;
+    return {
+      content: original.content,
+      pageNumber: original.pageNumber,
+      similarity: r.score, // cross-encoder score
+      documentTitle: original.documentTitle,
+    };
+  });
+}
+
+/**
+ * Multi-document variant: same fuse + rerank, but the candidate pool
+ * contains chunks from multiple documents.
+ */
+async function fuseAndRerankMultiDoc(
+  matched: Array<{
+    content: string;
+    page_number: number;
+    similarity: number;
+    document_id: string;
+  }>,
+  query: string,
+  titleMap: Map<string, string>,
+): Promise<RetrievedChunk[]> {
+  if (matched.length === 0) return [];
+
+  const indexEntries = matched.map((c, i) => ({
+    id: `chunk_${i}`,
+    content: c.content,
+    originalIndex: i,
+  }));
+  const bm25Index = buildBm25Index(indexEntries);
+  const bm25Results = bm25Search(bm25Index, query, matched.length);
+  const bm25Normalized = normalizeBm25Scores(bm25Results);
+  const bm25ByIndex = new Map<number, number>();
+  for (const r of bm25Normalized) bm25ByIndex.set(r.originalIndex, r.score);
+
+  const fused = matched.map((c, i) => {
+    const vectorSim = c.similarity ?? 0.5;
+    const bm25Score = bm25ByIndex.get(i) ?? 0;
+    const fusedScore =
+      HYBRID_SEARCH.bm25Weight * bm25Score +
+      HYBRID_SEARCH.vectorWeight * vectorSim;
+    return {
+      originalIndex: i,
+      content: c.content,
+      pageNumber: c.page_number,
+      documentTitle: titleMap.get(c.document_id),
+      fusedScore,
+      vectorSim,
+    };
+  });
+
+  fused.sort((a, b) => b.fusedScore - a.fusedScore);
+  const topForRerank = fused.slice(0, 10);
+
+  const rerankInput = topForRerank.map((r) => ({
+    originalIndex: r.originalIndex,
+    content: r.content,
+  }));
+  const reranked = await rerankCandidates(query, rerankInput);
+
+  return reranked.map((r) => {
+    const original = fused.find((f) => f.originalIndex === r.originalIndex)!;
+    return {
+      content: original.content,
+      pageNumber: original.pageNumber,
+      similarity: r.score,
+      documentTitle: original.documentTitle,
+    };
+  });
 }
 
 async function fetchDocTitles(

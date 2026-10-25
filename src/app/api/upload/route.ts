@@ -1,10 +1,10 @@
 import { type NextRequest, NextResponse } from 'next/server';
-import { extractPagesFromPdf, type ExtractedPage } from '@/lib/pdf/extractor';
+import { extractPagesFromUpload, type ExtractedPage } from '@/lib/pdf/extractor';
 import { splitTextIntoChunks } from '@/lib/pdf/chunker';
 import { generateEmbedding } from '@/lib/ai/embedding';
 import { supabaseAdmin } from '@/lib/supabase/server';
 import { resolveSession } from '@/lib/auth/session';
-import { validateUploadedFile, isTextExtension } from '@/lib/validation/file';
+import { validateUploadedFile } from '@/lib/validation/file';
 import { rateLimit } from '@/lib/rate-limit';
 import { logger } from '@/lib/logger';
 import {
@@ -18,6 +18,9 @@ import {
 import { UPLOAD_LIMITS, RATE_LIMIT } from '@/lib/constants';
 import type { ChunkPayload } from '@/lib/pdf/chunker';
 
+// ⚠️ Increased from 60s to give OCR + multi-format extraction room.
+// Vercel Hobby allows up to 60s on free tier; the project's "maxDuration"
+// hint is what Vercel uses. 60s is the hard cap on Hobby.
 export const maxDuration = 60;
 
 interface NewDocumentRow {
@@ -66,13 +69,15 @@ export async function POST(req: NextRequest) {
       throw unsupportedMediaType(`Invalid file: ${validation.reason ?? 'unknown error'}`);
     }
 
-    let pages: ExtractedPage[];
-    if (isTextExtension(file.name)) {
-      const text = new TextDecoder().decode(arrayBuffer);
-      pages = [{ pageNumber: 1, text: text.trim() }];
-    } else {
-      pages = await extractPagesFromPdf(arrayBuffer);
-    }
+    // ⚠️ Multi-format dispatch: the extractor inspects the file's MIME +
+    // extension and routes to the right backend (unpdf for PDF, mammoth
+    // for .docx, SheetJS for .xlsx, tesseract.js for images, plain
+    // TextDecoder for .txt/.md/.csv). For PDFs that look scanned
+    // (little extractable text) it falls back to tesseract.js OCR.
+    const pages: ExtractedPage[] = await extractPagesFromUpload({
+      file: { name: file.name, type: file.type },
+      buffer: arrayBuffer,
+    });
 
     const rawChunks: ChunkPayload[] = splitTextIntoChunks(pages);
     if (rawChunks.length === 0) {

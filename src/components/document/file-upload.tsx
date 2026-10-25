@@ -29,14 +29,29 @@ export function FileUpload({ userId, onUploadSuccess }: FileUploadProps) {
   const fileInputRef = React.useRef<HTMLInputElement>(null);
 
   async function processFile(file: File) {
+    // ⚠️ Multi-format support: PDF, Word (.docx), Excel (.xlsx/.xls/.csv),
+    // images (PNG/JPG/WEBP/GIF), and plain text (.txt/.md/.csv).
     const isPdf = file.type === 'application/pdf' || /\.pdf$/i.test(file.name);
+    const isWord =
+      file.type ===
+        'application/vnd.openxmlformats-officedocument.wordprocessingml.document' ||
+      /\.docx$/i.test(file.name);
+    const isExcel =
+      file.type ===
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' ||
+      /\.(xlsx|xls|csv)$/i.test(file.name);
+    const isImage = /^image\/(png|jpeg|webp|gif)$/i.test(file.type) ||
+      /\.(png|jpe?g|webp|gif)$/i.test(file.name);
     const isText =
       file.type === 'text/plain' ||
       file.type === 'text/markdown' ||
-      /\.(txt|md)$/i.test(file.name);
+      file.type === 'text/csv' ||
+      /\.(txt|md|csv)$/i.test(file.name);
 
-    if (!isPdf && !isText) {
-      setStatus('Error: Only PDF, TXT, and MD files are allowed.');
+    if (!isPdf && !isWord && !isExcel && !isImage && !isText) {
+      setStatus(
+        'Error: Only PDF, DOCX, XLSX, XLS, CSV, TXT, MD, PNG, JPG, WEBP, and GIF files are allowed.',
+      );
       return;
     }
 
@@ -122,7 +137,7 @@ export function FileUpload({ userId, onUploadSuccess }: FileUploadProps) {
         <input
           ref={fileInputRef}
           type="file"
-          accept=".pdf,.txt,.md,application/pdf,text/plain,text/markdown"
+          accept=".pdf,.txt,.md,.csv,.docx,.xlsx,.xls,.png,.jpg,.jpeg,.webp,.gif,application/pdf,text/plain,text/markdown,text/csv,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,image/png,image/jpeg,image/webp,image/gif"
           disabled={isLoading}
           onChange={handleFileChange}
           className="hidden"
@@ -138,7 +153,7 @@ export function FileUpload({ userId, onUploadSuccess }: FileUploadProps) {
             {isLoading ? 'Processing Ingestion' : 'Upload Document'}
           </div>
           <p className="text-xs text-fg-subtle">
-            Drag &amp; drop or click to browse (Max 10MB)
+            Drag &amp; drop or click to browse (PDF, DOCX, XLSX, CSV, TXT, MD, PNG, JPG — Max 10MB)
           </p>
         </div>
       </div>

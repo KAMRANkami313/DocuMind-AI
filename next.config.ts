@@ -21,12 +21,23 @@ const nextConfig: NextConfig = {
     '@xenova/transformers',
     'onnxruntime-node',
     'sharp',
+    // ⚠️ New heavy native/ESM deps that must be externalized from the
+    // server bundle. Without this, Vercel bundling fails on tesseract.js
+    // (uses native worker threads) and mammoth (uses ESM exports).
+    'tesseract.js',
+    'mammoth',
+    'xlsx',
+    'unpdf',
+    'pdfjs-dist',
   ],
   outputFileTracingIncludes: {
     '/api/upload': [
       './.transformers-cache/**/*',
       './node_modules/onnxruntime-node/bin/**/*',
       './node_modules/@xenova/transformers/**/*',
+      './node_modules/tesseract.js/**/*',
+      './node_modules/mammoth/**/*',
+      './node_modules/xlsx/**/*',
     ],
     '/api/chat': [
       './.transformers-cache/**/*',

@@ -89,7 +89,7 @@ export function ChatInput() {
               )}
             </div>
           )}
-          <input ref={fileInputRef} type="file" accept=".pdf,.txt,.md,application/pdf,text/plain,text/markdown" onChange={handleFileSelect} className="hidden" />
+          <input ref={fileInputRef} type="file" accept=".pdf,.txt,.md,.csv,.docx,.xlsx,.xls,.png,.jpg,.jpeg,.webp,.gif,application/pdf,text/plain,text/markdown,text/csv,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,image/png,image/jpeg,image/webp,image/gif" onChange={handleFileSelect} className="hidden" />
         </div>
 
         <input
