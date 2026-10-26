@@ -137,10 +137,24 @@ export async function POST(req: NextRequest) {
 
     const chunksWithEmbeddings: NewChunkRow[] = [];
     for (const chunk of finalChunks) {
-      const embedding = await generateEmbedding(chunk.content);
+      // ⚠️ Prepend `[Page N]:` directly to the chunk content so BM25
+      // keyword search (in /api/chat) indexes the page number. This
+      // enables queries like "what is on page 10?" to retrieve the
+      // correct chunk via lexical search rather than relying on vector
+      // similarity (which has no semantic overlap with the string
+      // "page 10").
+      //
+      // The /api/chat route also has a regex-based page-number query
+      // detector that does a direct SQL `WHERE page_number = N` lookup
+      // for guaranteed 100% recall — the page-number-prefix here is
+      // the fallback for BM25 search when the user asks "discuss page 5"
+      // without an explicit number.
+      const pagePrefix = `[Page ${chunk.pageNumber}]: `;
+      const chunkContent = pagePrefix + chunk.content;
+      const embedding = await generateEmbedding(chunkContent);
       chunksWithEmbeddings.push({
         document_id: document.id,
-        content: chunk.content,
+        content: chunkContent,
         page_number: chunk.pageNumber,
         embedding,
       });

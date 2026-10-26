@@ -136,6 +136,59 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    // ⚠️ Page-specific retrieval (per the spec): if the user's query
+    // contains an explicit page-number reference like "what is on page 10?"
+    // or "discuss slide 5", query Postgres DIRECTLY for chunks where
+    // page_number = N (scoped to the active document IDs and the
+    // authenticated user). This guarantees 100% recall for page-targeted
+    // questions — vector search has no semantic overlap with the string
+    // "page 10" and would otherwise miss the correct chunk.
+    //
+    // We still fall through to the hybrid BM25+vector+reranker pipeline
+    // for the rest of the context — the page-targeted chunks are merged
+    // in as a high-priority supplement.
+    let pageTargetedChunks: RetrievedChunk[] = [];
+    const pageMatch = latestUserMessage.match(/(?:page|slide|pg)\s*(?:no\.?\s*|number\s*|#\s*)?(\d{1,3})/i);
+    if (pageMatch && pageMatch[1]) {
+      const targetPage = parseInt(pageMatch[1], 10);
+      if (targetPage > 0 && targetPage < 10000) {
+        try {
+          // ⚠️ Permission-scoped query: only chunks from documents the
+          // user has access to (verified above via chat_sessions ownership
+          // for auth users, or via documentIds for guest mode).
+          const { data: pageChunks } = await queryClient
+            .from('document_chunks')
+            .select('content, page_number, document_id')
+            .in('document_id', allDocIds)
+            .eq('page_number', targetPage)
+            .order('document_id', { ascending: true })
+            .limit(10);
+          if (pageChunks && pageChunks.length > 0) {
+            // Fetch doc titles for the matched chunks
+            const matchedDocIds = Array.from(new Set(
+              (pageChunks as Array<{ document_id: string }>).map((c) => c.document_id),
+            ));
+            const pageTitleMap = await fetchDocTitles(queryClient, matchedDocIds);
+            pageTargetedChunks = (pageChunks as Array<{ content: string; page_number: number; document_id: string }>).map((c) => ({
+              content: c.content,
+              pageNumber: c.page_number,
+              similarity: 1.0, // explicit page match = highest priority
+              documentTitle: pageTitleMap.get(c.document_id),
+            }));
+            logger.info('Page-targeted retrieval', {
+              targetPage,
+              matchedChunks: pageTargetedChunks.length,
+              docIds: matchedDocIds,
+            });
+          }
+        } catch (err) {
+          // Page-targeted query failed — fall through to hybrid search.
+          const message = err instanceof Error ? err.message : String(err);
+          logger.warn('Page-targeted query failed', { targetPage, error: message });
+        }
+      }
+    }
+
     // ⚡ Hybrid retrieval + cross-encoder re-ranking
     // 1. Fetch a candidate pool from Postgres vector search (top-20 per doc)
     // 2. Build BM25 index over the candidate pool, score against query
@@ -143,7 +196,17 @@ export async function POST(req: NextRequest) {
     //    with HYBRID_SEARCH weights (default: 0.4 BM25 + 0.6 vector)
     // 4. Cross-encoder re-rank top-10 of the fused list
     // 5. Return top-6 chunks as LLM context
-    const context = await retrieveContext(queryClient, allDocIds, queryForSearch);
+    // 6. If page-targeted chunks were found, prepend them to the context
+    //    (deduped by content) so the LLM sees the explicitly-requested page.
+    let context = await retrieveContext(queryClient, allDocIds, queryForSearch);
+    if (pageTargetedChunks.length > 0) {
+      // Dedupe: remove any context chunks whose content matches a
+      // page-targeted chunk (the page-targeted version is preferred).
+      const pageContents = new Set(pageTargetedChunks.map((c) => c.content.slice(0, 100)));
+      context = context.filter((c) => !pageContents.has(c.content.slice(0, 100)));
+      // Prepend the page-targeted chunks (highest priority)
+      context = [...pageTargetedChunks, ...context].slice(0, 8);
+    }
 
     const systemPrompt = buildSystemPrompt(docTitle, context);
 

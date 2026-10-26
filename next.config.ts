@@ -34,6 +34,11 @@ const nextConfig: NextConfig = {
     // ⚠️ Used for universal image preprocessing (luminance analysis +
     // negate / grayscale / normalize / sharpen) before OCR.
     'jszip',
+    // ⚠️ Official Google GenAI SDK (@google/genai, not the deprecated
+    // @google/generative-ai). Used for Gemini Vision image extraction —
+    // much faster + more accurate than local Tesseract on colored
+    // backgrounds (the user's olive-green certificate case).
+    '@google/genai',
   ],
   outputFileTracingIncludes: {
     '/api/upload': [
@@ -46,6 +51,7 @@ const nextConfig: NextConfig = {
       './node_modules/@napi-rs/canvas/**/*',
       './node_modules/sharp/**/*',
       './node_modules/jszip/**/*',
+      './node_modules/@google/genai/**/*',
     ],
     '/api/chat': [
       './.transformers-cache/**/*',

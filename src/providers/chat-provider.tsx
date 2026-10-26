@@ -92,6 +92,16 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
 
   const abortControllerRef = React.useRef<AbortController | null>(null);
 
+  // ⚠️ Track which session is currently loaded in `messages` state so
+  // we can skip the load-session effect when the same session is already
+  // loaded. Without this guard, the effect re-fires every time `user`
+  // object identity changes (which happens on Supabase token refresh
+  // and on tab focus revalidation) — even though `activeSessionId` and
+  // `user.id` haven't changed. This caused the tab-switch reload bug:
+  // every browser tab focus loss/regain wiped messages + showed skeleton.
+  const loadedSessionRef = React.useRef<string | null>(null);
+  const loadedUserRef = React.useRef<string | null>(null);
+
   const activeSession = React.useMemo(
     () => sessions.find((s) => s.id === activeSessionId) ?? null,
     [sessions, activeSessionId],
@@ -162,34 +172,81 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
 
   React.useEffect(() => {
     let active = true;
-    async function loadSessionData() {
-      if (!activeSessionId || !user) {
-        setMessages([]);
-        setAttachedDocs([]);
-        setIsSessionLoading(false);
-        return;
-      }
-      setIsSessionLoading(true);
+
+    // ⚠️ Tab-switch reload bug fix: the previous deps array was
+    // `[activeSessionId, user, showError]`. The `user` object identity
+    // changes on every Supabase auth token refresh (which fires on
+    // tab focus revalidation) — even though `user.id` is stable. This
+    // caused the effect to re-fire on every tab refocus, wiping
+    // messages and showing the skeleton loader.
+    //
+    // Fix (per the AI advisor):
+    //   1. Change deps array to `[activeSessionId, user?.id, showError]`
+    //      so the effect only fires when `user.id` changes (not when
+    //      the user object reference changes).
+    //   2. Add a ref-based guard: track `loadedSessionRef.current` and
+    //      `loadedUserRef.current` — if the active session + user combo
+    //      is already loaded in `messages` state, skip the load entirely.
+    //   3. This is state-aware: even if the deps array fires the effect,
+    //      the ref guard prevents the actual `setMessages([])` + fetch.
+    const currentUserId = user?.id ?? null;
+    if (!activeSessionId || !currentUserId) {
       setMessages([]);
       setAttachedDocs([]);
-      try {
-        const data = await loadChatSession(activeSessionId);
-        if (!active) {
-          setIsSessionLoading(false);
-          return;
-        }
-        setMessages(data.messages);
-        setAttachedDocs(data.documents);
-      } catch (err) {
-        const message = err instanceof Error ? err.message : 'Unknown error';
-        if (active) showError('Failed to load chat', message);
-      } finally {
-        if (active) setIsSessionLoading(false);
-      }
+      setIsSessionLoading(false);
+      loadedSessionRef.current = null;
+      loadedUserRef.current = null;
+      return;
     }
-    void loadSessionData();
+
+    // Guard: if this exact (session, user) combo is already loaded,
+    // skip the fetch entirely. This is the critical fix for the
+    // tab-switch reload bug.
+    if (
+      loadedSessionRef.current === activeSessionId &&
+      loadedUserRef.current === currentUserId
+    ) {
+      // Already loaded — don't wipe messages, don't show skeleton.
+      return;
+    }
+
+    setIsSessionLoading(true);
+    setMessages([]);
+    setAttachedDocs([]);
+    try {
+      void (async () => {
+        try {
+          const data = await loadChatSession(activeSessionId);
+          if (!active) {
+            setIsSessionLoading(false);
+            return;
+          }
+          setMessages(data.messages);
+          setAttachedDocs(data.documents);
+          // Mark this session as loaded so subsequent re-fires of the
+          // effect (e.g., on tab focus) skip the fetch.
+          loadedSessionRef.current = activeSessionId;
+          loadedUserRef.current = currentUserId;
+        } catch (err) {
+          const message = err instanceof Error ? err.message : 'Unknown error';
+          if (active) showError('Failed to load chat', message);
+          // On failure, clear the loaded marker so a retry can re-fetch.
+          loadedSessionRef.current = null;
+          loadedUserRef.current = null;
+        } finally {
+          if (active) setIsSessionLoading(false);
+        }
+      })();
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Unknown error';
+      if (active) showError('Failed to load chat', message);
+      setIsSessionLoading(false);
+    }
     return () => { active = false; };
-  }, [activeSessionId, user, showError]);
+    // ⚠️ Deps: use `user?.id` instead of `user` so the effect doesn't
+    // re-fire on tab focus revalidation (which creates a new user
+    // object but with the same id).
+  }, [activeSessionId, user?.id, showError]);
 
   const createNewChat = React.useCallback(async () => {
     if (activeSession && messages.length === 0 && attachedDocs.length === 0) {
@@ -223,6 +280,11 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
   }, [activeSession, messages, attachedDocs, user, showError]);
 
   const selectChat = React.useCallback((sessionId: string) => {
+    // ⚠️ Clear the loaded marker so the load-session effect re-fetches
+    // the newly-selected chat's messages. Without this, the ref-guard
+    // would skip the fetch when the user clicks a different chat.
+    loadedSessionRef.current = null;
+    loadedUserRef.current = null;
     setActiveSessionId(sessionId);
   }, []);
 

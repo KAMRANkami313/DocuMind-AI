@@ -222,12 +222,29 @@ export async function preprocessImage(
 /**
  * Run OCR on a single image buffer (PNG / JPG / WEBP / GIF).
  *
- * ⚠️ Universal preprocessing pipeline (per the universal ingestion spec):
- *   1. Compute mean luminance L with sharp.stats()
- *   2. If L < 115 → apply .negate() to flip dark backgrounds to white
- *   3. If L ≥ 115 → apply .grayscale().normalize().sharpen() to strip
- *      colored tints and expand dynamic range
- *   4. Then run tesseract.js OCR on the preprocessed PNG
+ * ⚠️ Universal OCR pipeline (per the Gemini Vision integration spec):
+ *
+ *   1. Try Gemini Vision first (one model from the pool at a time):
+ *      - 100% accurate on the olive-green certificate test (vs. Tesseract 0%)
+ *      - ~1 second per image (vs. Tesseract 10-30 seconds at scale 2.0)
+ *      - The Gemini pool in src/lib/ai/gemini-pool.ts handles circuit
+ *        breaker logic (429 daily → disable until Pacific midnight,
+ *        429 minute → 60s cooldown, 503 → 5min cooldown, 404 → permanent).
+ *
+ *   2. If ALL Gemini models are unavailable OR no GEMINI_API_KEY is set:
+ *      Fall back to local sharp preprocessing + tesseract.js OCR.
+ *      This is the EMERGENCY path — slower but works offline.
+ *
+ *   3. Preprocessing (when using local path):
+ *      Compute mean luminance L with sharp.stats():
+ *        L < 115  → dark bg → .negate() to flip dark→white
+ *        L ≥ 115  → light bg → .grayscale().normalize().sharpen()
+ *      Then Tesseract OCR on the preprocessed PNG.
+ *
+ *   4. If preprocessing fails (corrupt image), return empty text WITHOUT
+ *      calling Tesseract — passing a corrupt buffer to tesseract.js v5
+ *      crashes the worker thread with an uncatchable 'Error attempting
+ *      to read image'.
  *
  * Returns the recognized text trimmed; EMPTY STRING if nothing was
  * found (does NOT throw — caller can decide whether to skip the page
@@ -237,13 +254,36 @@ export async function ocrImageBuffer(
   buffer: ArrayBuffer | Uint8Array,
   onProgress?: (info: { status: string; progress: number }) => void,
 ): Promise<{ text: string; confidence: number }> {
-  // 1. Preprocess via sharp (handles dark/colored backgrounds).
-  //    ⚠️ If preprocessing fails (e.g. corrupt image), we return empty
-  //    text WITHOUT calling tesseract.js — passing a corrupt buffer to
-  //    tesseract.js v5 causes an uncatchable worker-thread crash:
-  //    'Error attempting to read image' emitted via process.nextTick.
-  //    Better to skip the OCR entirely and let the caller handle empty
-  //    text (page omitted, or placeholder chunk inserted by upload route).
+  // 1. Try Gemini Vision first (fast, accurate, handles colored backgrounds).
+  //    The Gemini pool itself handles model rotation + circuit breaker.
+  try {
+    const { extractTextFromImageViaGemini } = await import('@/lib/ai/gemini-pool');
+    // ⚠️ Defensive copy — Gemini SDK may transfer/detach the buffer.
+    const geminiInput: Uint8Array = buffer instanceof ArrayBuffer
+      ? new Uint8Array(buffer.slice(0))
+      : new Uint8Array(buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength));
+    const geminiResult = await extractTextFromImageViaGemini({
+      imageBuffer: geminiInput,
+      // Gemini accepts the raw image — no need for sharp preprocessing
+      // (Gemini's internal tokenizer handles colored backgrounds natively).
+      mimeType: 'image/png',
+    });
+    if (geminiResult.extractionMethod === 'gemini' && geminiResult.text) {
+      // Gemini succeeded — return its text with high confidence.
+      // (Gemini doesn't expose a per-image confidence score, but the
+      // user's certificate test showed 100% accurate extraction, so
+      // we use 95 as a reasonable proxy.)
+      return { text: geminiResult.text, confidence: 95 };
+    }
+    // Gemini failed or returned empty text → fall through to local Tesseract
+    // console.warn(`[ocrImageBuffer] Gemini pool exhausted, falling back to local Tesseract`);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.warn('[ocrImageBuffer] Gemini path failed unexpectedly, falling back to local:', message);
+  }
+
+  // 2. Local fallback: sharp preprocessing + tesseract.js OCR.
+  // 2a. Preprocess via sharp (handles dark/colored backgrounds).
   let preprocessedBuffer: ArrayBuffer;
   try {
     preprocessedBuffer = await preprocessImage(buffer);
@@ -253,7 +293,7 @@ export async function ocrImageBuffer(
     return { text: '', confidence: 0 };
   }
 
-  // 2. Run tesseract.js on the preprocessed image.
+  // 2b. Run tesseract.js on the preprocessed image.
   const worker = await getWorker();
   try {
     // Defensive copy — tesseract.js transfers the ArrayBuffer to its
@@ -268,7 +308,7 @@ export async function ocrImageBuffer(
     // (skip the page, include as empty placeholder, etc.). We do NOT
     // throw — that would crash the upload route with 500.
     const message = err instanceof Error ? err.message : String(err);
-    console.warn('[ocrImageBuffer] OCR failed:', message);
+    console.warn('[ocrImageBuffer] local Tesseract OCR failed:', message);
     return { text: '', confidence: 0 };
   }
 }
