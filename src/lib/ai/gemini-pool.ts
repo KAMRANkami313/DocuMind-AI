@@ -41,13 +41,25 @@ import { logger } from '@/lib/logger';
 // `gemini-3-flash-preview` is the user's primary verified-working model
 // (the certificate test in PowerShell used this exact model and got
 // 100% extraction in <1s).
+// ⚠️ POOL ORDERING — sorted by actual daily quota (RPD) from the
+// Google AI Studio dashboard:
+//   TIER 1 (500 RPD each — highest capacity, use first):
+//     gemini-3.1-flash-lite    — 15 RPM, 250K TPM, 500 RPD
+//     gemini-3.5-flash-lite   — 15 RPM, 250K TPM, 500 RPD
+//   TIER 2 (20 RPD each — lower capacity, use after Tier 1 exhausted):
+//     gemini-3-flash-preview   — 5 RPM, 250K TPM, 20 RPD  (user's verified primary)
+//     gemini-3.5-flash         — 5 RPM, 250K TPM, 20 RPD
+//     gemini-3.6-flash         — 5 RPM, 250K TPM, 20 RPD
+//     gemini-flash-lite-latest — fallback tier
 export const GEMINI_POOL_MODELS = [
+  // TIER 1 — 500 RPD each (use first)
+  'gemini-3.1-flash-lite',
+  'gemini-3.5-flash-lite',
+  // TIER 2 — 20 RPD each (failover when Tier 1 exhausted)
   'gemini-3-flash-preview',       // user's verified primary
-  'gemini-3.1-flash-lite',        // user's verified
-  'gemini-3.5-flash',              // user's verified
-  'gemini-3.5-flash-lite',         // user's verified
-  'gemini-3.6-flash',             // user's verified
-  'gemini-flash-lite-latest',     // user's verified
+  'gemini-3.5-flash',
+  'gemini-3.6-flash',
+  'gemini-flash-lite-latest',
 ] as const;
 
 const API_KEY = process.env.GEMINI_API_KEY;
@@ -460,3 +472,178 @@ export function getPoolStatus(): Array<{ model: string; status: string; lastErro
 }
 
 void poolInitialized; // silence unused-variable warning
+
+// ============================================================================
+// ⚠️ BATCHED IMAGE EXTRACTION
+//
+// By batching 5-8 images per request, a 14-page document consumes only
+// 2-3 RPD instead of 14 — an 80% reduction in API quota usage.
+// ============================================================================
+
+export interface BatchedImage {
+  pageNumber: number;
+  buffer: ArrayBuffer | Uint8Array;
+  mimeType?: string;
+}
+
+export interface BatchedExtractionResult {
+  /** Map of pageNumber → extracted text */
+  pageTexts: Map<number, string>;
+  modelUsed: string;
+  extractionMethod: 'gemini' | 'fallback:local-tesseract';
+}
+
+const MAX_PAGES_PER_BATCH = 6;
+
+const BATCHED_EXTRACT_PROMPT_PREFIX =
+  'You are given multiple document page images below. Transcribe ALL readable text, code, ' +
+  'tables, and document details from EACH image verbatim in clean Markdown. ' +
+  'Do not summarize. Do not add commentary. ' +
+  'For each image, prefix your transcription with exactly: `--- PAGE N ---` ' +
+  'where N is the page number shown below the image. ' +
+  'If a page has no readable text, respond with just `--- PAGE N ---\nEMPTY`. ' +
+  'Keep pages in order. Here are the images:\n\n';
+
+/**
+ * Try one Gemini model with a BATCH of images. Returns the full text
+ * response (with `--- PAGE N ---` delimiters) or throws on failure.
+ */
+async function tryOneModelBatched(
+  entry: PoolEntry,
+  images: BatchedImage[],
+): Promise<string> {
+  const client = ensureClients(entry);
+  if (!client) {
+    throw new Error(`Gemini client could not be constructed for model ${entry.model}`);
+  }
+
+  // Build the parts array: alternating text labels + inline images
+  const parts: Array<{ text: string } | { inlineData: { data: string; mimeType: string } }> = [];
+  let promptText = BATCHED_EXTRACT_PROMPT_PREFIX;
+  for (const img of images) {
+    promptText += `Image for Page ${img.pageNumber}:\n`;
+  }
+  parts.push({ text: promptText });
+
+  for (const img of images) {
+    const uint8 = img.buffer instanceof Uint8Array
+      ? img.buffer
+      : new Uint8Array(img.buffer);
+    const base64Data = Buffer.from(uint8).toString('base64');
+    parts.push({
+      inlineData: {
+        data: base64Data,
+        mimeType: img.mimeType ?? 'image/png',
+      },
+    });
+  }
+
+  type ContentShape = { role?: string; parts: typeof parts };
+  const contents: ContentShape[] = [
+    { role: 'user', parts },
+  ];
+
+  const response = await client.models.generateContent({
+    model: entry.model,
+    contents: contents as unknown as Parameters<typeof client.models.generateContent>[0]['contents'],
+  });
+
+  const candidates = (response as unknown as { candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }> }).candidates;
+  if (!candidates || candidates.length === 0) {
+    return '';
+  }
+  const responseParts = candidates[0]?.content?.parts ?? [];
+  return responseParts.map((p) => p?.text ?? '').filter(Boolean).join('\n').trim();
+}
+
+/**
+ * Parse a batched Gemini response and split it by `--- PAGE N ---` delimiters.
+ */
+function parseBatchedResponse(
+  response: string,
+  pageNumbers: number[],
+): Map<number, string> {
+  const result = new Map<number, string>();
+  for (const pn of pageNumbers) {
+    result.set(pn, '');
+  }
+
+  const sections = response.split(/---\s*PAGE\s*(\d+)\s*---/i);
+  for (let i = 1; i < sections.length; i += 2) {
+    const pageNum = parseInt(sections[i]!, 10);
+    const text = (sections[i + 1] ?? '').trim();
+    if (result.has(pageNum)) {
+      if (text && text.toUpperCase() !== 'EMPTY') {
+        result.set(pageNum, text);
+      }
+    }
+  }
+
+  return result;
+}
+
+const triedModelsAny = new Set<string>();
+
+/**
+ * Extract text from MULTIPLE images in a SINGLE Gemini call (batched).
+ */
+export async function extractTextFromMultipleImagesViaGemini(
+  images: BatchedImage[],
+): Promise<BatchedExtractionResult> {
+  if (!API_KEY || images.length === 0) {
+    return { pageTexts: new Map(), modelUsed: '', extractionMethod: 'fallback:local-tesseract' };
+  }
+
+  const pageTexts = new Map<number, string>();
+
+  for (let i = 0; i < images.length; i += MAX_PAGES_PER_BATCH) {
+    const batch = images.slice(i, i + MAX_PAGES_PER_BATCH);
+    const batchPageNumbers = batch.map((b) => b.pageNumber);
+
+    let batchSucceeded = false;
+    const triedModels = new Set<string>();
+
+    while (!batchSucceeded) {
+      const entry = pickNextModel();
+      if (!entry || triedModels.has(entry.model)) {
+        break;
+      }
+      triedModels.add(entry.model);
+      triedModelsAny.add(entry.model);
+
+      try {
+        const response = await tryOneModelBatched(entry, batch);
+        const parsed = parseBatchedResponse(response, batchPageNumbers);
+        for (const [pn, text] of parsed) {
+          pageTexts.set(pn, text);
+        }
+        batchSucceeded = true;
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        let httpStatus: number | undefined;
+        const statusMatch = message.match(/\b(\d{3})\b/);
+        if (statusMatch) {
+          const code = parseInt(statusMatch[1]!, 10);
+          if (code >= 400 && code < 600) httpStatus = code;
+        }
+        const classification = classifyGeminiError(err, httpStatus);
+        applyCircuitBreaker(entry, classification);
+      }
+    }
+
+    if (!batchSucceeded) {
+      logger.warn('[gemini-pool] Batch failed, will use local Tesseract fallback', {
+        batchPages: batchPageNumbers,
+      });
+      return { pageTexts, modelUsed: '', extractionMethod: 'fallback:local-tesseract' };
+    }
+  }
+
+  return {
+    pageTexts,
+    modelUsed: 'gemini-pool',
+    extractionMethod: 'gemini',
+  };
+}
+
+void triedModelsAny;

@@ -75,10 +75,19 @@ export async function extractTextFromDocx(
   const bufferForZip = buffer.slice(0);
 
   // 1. Extract body text via mammoth.
+  //    ⚠️ FIX: mammoth's `extractRawText({ arrayBuffer })` option
+  //    sometimes fails with "Could not find file in options" when the
+  //    ArrayBuffer is from a different runtime context. The reliable
+  //    fix is to convert to a Node.js Buffer and use mammoth's `buffer`
+  //    option instead — mammoth checks `if (input.buffer)` first and
+  //    uses `readFromBuffer(input.buffer, options)` which reliably works.
+  //    This was the root cause of the BinSense .docx losing all 12 pages
+  //    of body text when mammoth crashed.
   const mammoth = await import('mammoth');
   let bodyText = '';
   try {
-    const result = await mammoth.extractRawText({ arrayBuffer: bufferForMammoth });
+    const nodeBuffer = Buffer.from(bufferForMammoth);
+    const result = await mammoth.extractRawText({ buffer: nodeBuffer });
     bodyText = (result.value || '').trim();
   } catch (err) {
     // mammoth failed — continue with empty body, we'll still try to OCR

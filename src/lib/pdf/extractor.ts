@@ -28,7 +28,7 @@ import {
   isTextExtension,
   isTextMime,
 } from '@/lib/validation/file';
-import { ocrPdfPerPage, looksScanned } from './ocr';
+import { ocrPdfPerPage } from './ocr';
 
 export interface ExtractedPage {
   pageNumber: number;
@@ -75,33 +75,28 @@ export async function extractPagesFromPdf(buffer: ArrayBuffer): Promise<Extracte
     console.warn('[extractor] unpdf.extractText failed, going straight to per-page OCR:', message);
   }
 
-  // 2. ⚠️ FAST PATH: if unpdf extracted substantive text per page on
-  //    average (≥ RETRIEVAL.scannedPdfTextThreshold), assume the PDF
-  //    is text-based (academic papers, technical docs, reports). Skip
-  //    the per-page OCR pipeline entirely — no getOperatorList() calls,
-  //    no canvas rendering, no Gemini API calls. This restores the
-  //    "fast as before" behavior the user reported as broken.
+  // 2. ⚠️ ALWAYS run the per-page OCR pipeline.
   //
-  //    The previous version of this file ALWAYS ran the per-page OCR
-  //    pipeline (even for pure-text PDFs), which added ~50ms × N pages
-  //    of getOperatorList() overhead for no benefit.
+  //    The previous version had a "fast-path" that skipped the per-page
+  //    pipeline entirely when the document had substantive text overall:
+  //      if (unpdfPages.length > 0 && !looksScanned(unpdfPages)) return ...;
   //
-  //    `looksScanned()` returns TRUE if avg text-per-page < threshold,
-  //    i.e. the PDF is likely scanned/image-based. We invert that here:
-  //    if `!looksScanned()` AND unpdf gave us text, use it directly.
-  if (unpdfPages.length > 0 && !looksScanned(unpdfPages)) {
-    return unpdfPages.filter((p) => p.text.length > 0);
-  }
-
-  // 3. SLOW PATH: PDF appears scanned (sparse text overall) OR unpdf
-  //    returned nothing. Run the per-page OCR pipeline, which uses
-  //    operator-list inspection to decide per-page:
-  //      - Pure text page (no images): returns digital text, skips OCR
-  //      - Pure scanned page (no text, has images or nothing): OCR
-  //      - Hybrid page (text + images): merge digital text + OCR text
-  //    This handles the user's reported cases: slide decks with terminal
-  //    screenshots, notebooks with Matplotlib charts, certificates with
-  //    typed names on colored backgrounds.
+  //    This caused a critical bug: a 12-page academic proposal with
+  //    thousands of characters of text BUT with a handwritten signature
+  //    image on page 3 → the fast-path skipped the per-page pipeline →
+  //    the signature was never OCR'd → the LLM replied "no visual
+  //    signature was recorded" when asked.
+  //
+  //    The fix: ALWAYS run ocrPdfPerPage. Inside it, the per-page
+  //    operator-list inspection decides per-page:
+  //      - Pure text page (no image operators): return digital text
+  //        immediately → zero OCR overhead → fast as before
+  //      - Hybrid page (text + embedded images): render + OCR → captures
+  //        the signature/chart that the fast-path was dropping
+  //
+  //    The overhead for pure-text PDFs is ~50ms/page for getOperatorList()
+  //    calls, which is negligible for typical documents (10-50 pages).
+  //    For a 100-page text PDF, that's ~5s — acceptable.
   try {
     const perPage = await ocrPdfPerPage(bufferForOcr, {
       unpdfPages,
@@ -121,12 +116,12 @@ export async function extractPagesFromPdf(buffer: ArrayBuffer): Promise<Extracte
     console.warn('[extractor] Per-page OCR pipeline failed, falling back to unpdf text only:', message);
   }
 
-  // 4. Final fallback: return unpdf's text only (no embedded-image OCR).
+  // 3. Final fallback: return unpdf's text only (no embedded-image OCR).
   if (unpdfPages.length > 0) {
     return unpdfPages.filter((p) => p.text.length > 0);
   }
 
-  // 5. Total failure — throw an actionable error. The upload route
+  // 4. Total failure — throw an actionable error. The upload route
   //    catches this and surfaces a friendly message.
   throw new Error(
     'No text could be extracted from this PDF. The file may be corrupt, ' +
