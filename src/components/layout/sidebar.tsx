@@ -55,6 +55,10 @@ export function Sidebar({ className, onNavigate, onToggleCollapse, isCollapsed }
     documents,
     attachDocument,
     isStreaming,
+    // ⚠️ isSessionsLoading lets us show skeleton loaders in the chat list
+    // while the /api/chat-sessions list is being fetched after login /
+    // page refresh.
+    isSessionsLoading,
   } = useChat();
 
   const [menuSessionId, setMenuSessionId] = React.useState<string | null>(null);
@@ -204,7 +208,27 @@ export function Sidebar({ className, onNavigate, onToggleCollapse, isCollapsed }
         className="min-h-0 flex-1 space-y-1 overflow-y-auto overscroll-y-contain pr-1"
         style={{ WebkitOverflowScrolling: 'touch' }}
       >
-        {filteredSessions.length === 0 ? (
+        {isSessionsLoading && filteredSessions.length === 0 ? (
+          // ⚠️ Skeleton loaders while chat sessions list is being fetched
+          // after login / page refresh. Render 6 shimmer placeholders so
+          // the user immediately sees activity instead of "No chats yet."
+          // (which previously appeared during the ~250ms fetch window).
+          <>
+            {Array.from({ length: 6 }).map((_, i) => (
+              <div
+                key={`skel-${i}`}
+                className="flex animate-pulse items-start gap-2 rounded-lg border border-transparent p-2.5 text-xs"
+                aria-hidden="true"
+              >
+                <div className="mt-0.5 h-3.5 w-3.5 shrink-0 rounded bg-surface-3" />
+                <div className="flex-1 space-y-1.5">
+                  <div className="h-2.5 w-2/3 rounded bg-surface-3" />
+                  <div className="h-2 w-1/3 rounded bg-surface-3" />
+                </div>
+              </div>
+            ))}
+          </>
+        ) : filteredSessions.length === 0 ? (
           <div className="rounded-lg border border-dashed border-border p-3 text-center text-xs text-fg-subtle italic">
             {searchQuery ? 'No chats match your search.' : 'No chats yet.'}
           </div>

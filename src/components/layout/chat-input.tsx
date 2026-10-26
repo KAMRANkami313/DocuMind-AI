@@ -1,14 +1,31 @@
 'use client';
 
 import * as React from 'react';
-import { Send, Paperclip } from 'lucide-react';
+import { Send, Paperclip, Loader2 } from 'lucide-react';
 import { useChat } from '@/hooks/use-chat';
 import { StopButton } from '@/components/chat/stop-button';
 import { MAX_DOCUMENTS_PER_CHAT } from '@/lib/constants';
 import { cn } from '@/lib/utils';
 
 export function ChatInput() {
-  const { input, setInput, isLoading, activeSession, handleSubmit, isStreaming, stopGeneration, attachedDocs, documents, attachDocument, uploadAndAttachDocument } = useChat();
+  const {
+    input,
+    setInput,
+    isLoading,
+    activeSession,
+    handleSubmit,
+    isStreaming,
+    stopGeneration,
+    attachedDocs,
+    documents,
+    attachDocument,
+    uploadAndAttachDocument,
+    // ⚠️ isUploading: true while a document is being uploaded via the
+    // paperclip button. Shows a spinner on the paperclip button and
+    // disables input + send so the user can't submit a half-uploaded
+    // chat session.
+    isUploading,
+  } = useChat();
   const [attachOpen, setAttachOpen] = React.useState(false);
   const attachRef = React.useRef<HTMLDivElement>(null);
   const fileInputRef = React.useRef<HTMLInputElement>(null);
@@ -26,7 +43,7 @@ export function ChatInput() {
   function handleKeyDown(event: React.KeyboardEvent<HTMLInputElement>) {
     if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
       event.preventDefault();
-      if (!isLoading && input.trim() && activeSession) void handleSubmit();
+      if (!isLoading && !isUploading && input.trim() && activeSession) void handleSubmit();
     }
   }
 
@@ -44,24 +61,46 @@ export function ChatInput() {
 
   const canAttach = attachedDocs.length < MAX_DOCUMENTS_PER_CHAT;
 
+  // Disable input while: streaming a reply, uploading a document, no
+  // active session, or no docs attached yet (chat requires at least one
+  // doc to be answerable).
+  const inputDisabled = isLoading || isUploading || !activeSession || attachedDocs.length === 0;
+  const sendDisabled = isLoading || isUploading || !input.trim() || !activeSession || attachedDocs.length === 0;
+  const attachDisabled = !canAttach || !activeSession || isLoading || isUploading;
+
   return (
     <div className="border-t border-border bg-surface/60 p-3 sm:p-4 backdrop-blur-md">
       <form onSubmit={onSubmit} className="mx-auto flex max-w-3xl items-center gap-2">
         <div className="relative" ref={attachRef}>
           <button
             type="button"
-            onClick={() => canAttach && setAttachOpen(!attachOpen)}
-            disabled={!canAttach || !activeSession || isLoading}
+            onClick={() => canAttach && !isUploading && setAttachOpen(!attachOpen)}
+            disabled={attachDisabled}
             className={cn(
               'flex h-10 w-10 shrink-0 cursor-pointer items-center justify-center rounded-xl border transition',
-              canAttach ? 'border-border bg-surface text-fg-muted hover:bg-surface-2 hover:text-primary' : 'border-border bg-surface text-fg-subtle opacity-50',
+              attachDisabled
+                ? 'border-border bg-surface text-fg-subtle opacity-50'
+                : 'border-border bg-surface text-fg-muted hover:bg-surface-2 hover:text-primary',
+              // ⚠️ Highlight the paperclip while uploading so the user
+              // sees where the activity is happening.
+              isUploading && 'border-primary/40 bg-primary-soft text-primary',
             )}
-            title={canAttach ? `Attach document (${attachedDocs.length}/${MAX_DOCUMENTS_PER_CHAT})` : 'Document limit reached'}
+            title={
+              isUploading
+                ? 'Uploading document…'
+                : canAttach
+                  ? `Attach document (${attachedDocs.length}/${MAX_DOCUMENTS_PER_CHAT})`
+                  : 'Document limit reached'
+            }
             aria-label="Attach document"
           >
-            <Paperclip className="h-4 w-4" />
+            {isUploading ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <Paperclip className="h-4 w-4" />
+            )}
           </button>
-          {attachOpen && (
+          {attachOpen && !isUploading && (
             <div className="absolute bottom-12 left-0 z-50 w-64 rounded-lg border border-border bg-surface shadow-elevated py-1 max-h-64 overflow-y-auto">
               <button
                 type="button"
@@ -98,14 +137,16 @@ export function ChatInput() {
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={handleKeyDown}
           placeholder={
+            isUploading ? 'Uploading document…' :
             !activeSession ? 'Create a new chat to start...' :
             attachedDocs.length === 0 ? 'Attach a document first...' :
             'Ask anything about your documents...'
           }
-          disabled={isLoading || !activeSession || attachedDocs.length === 0}
+          disabled={inputDisabled}
           className={cn(
             'flex-1 rounded-xl border border-border bg-surface px-4 py-3 text-sm text-fg',
             'placeholder-fg-subtle transition focus:border-primary focus:outline-none disabled:opacity-50',
+            isUploading && 'border-primary/40',
           )}
         />
 
@@ -114,7 +155,7 @@ export function ChatInput() {
         ) : (
           <button
             type="submit"
-            disabled={isLoading || !input.trim() || !activeSession || attachedDocs.length === 0}
+            disabled={sendDisabled}
             className={cn(
               'flex cursor-pointer items-center gap-2 rounded-xl px-5 py-3 text-sm font-semibold text-white transition',
               'bg-primary text-primary-fg hover:bg-primary-hover',
@@ -122,11 +163,22 @@ export function ChatInput() {
               'shadow-md shadow-primary/25',
             )}
           >
-            <Send className="h-4 w-4" />
+            {isUploading ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <Send className="h-4 w-4" />
+            )}
           </button>
         )}
       </form>
-      {attachedDocs.length > 0 && (
+      {/* ⚠️ Visible upload progress line below the input bar */}
+      {isUploading && (
+        <div className="mx-auto mt-2 flex max-w-3xl items-center gap-2 rounded-lg border border-primary/30 bg-primary-soft px-3 py-1.5 text-[11px] text-primary">
+          <Loader2 className="h-3 w-3 shrink-0 animate-spin" />
+          <span className="truncate">Processing document — parsing, OCR, and embedding…</span>
+        </div>
+      )}
+      {attachedDocs.length > 0 && !isUploading && (
         <p className="mx-auto mt-1.5 max-w-3xl text-[10px] text-fg-subtle">
           {attachedDocs.length}/{MAX_DOCUMENTS_PER_CHAT} documents attached
         </p>

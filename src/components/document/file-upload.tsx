@@ -56,7 +56,7 @@ export function FileUpload({ userId, onUploadSuccess }: FileUploadProps) {
     }
 
     setIsLoading(true);
-    setStatus('Parsing document & creating vector embeddings...');
+    setStatus('Parsing document, running OCR where needed, and creating vector embeddings...');
 
     const formData = new FormData();
     formData.append('file', file);

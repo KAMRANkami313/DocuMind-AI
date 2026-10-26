@@ -38,6 +38,12 @@ interface ChatContextValue {
   input: string;
   isLoading: boolean;
   isStreaming: boolean;
+  // True while the chat sessions list is being fetched after login/refresh
+  isSessionsLoading: boolean;
+  // True while a specific session's messages + attached docs are being loaded
+  isSessionLoading: boolean;
+  // True while a document is being uploaded via the chat-input's paperclip button
+  isUploading: boolean;
   selectedCitation: Citation | null;
   isDrawerOpen: boolean;
   isPreviewOpen: boolean;
@@ -79,6 +85,11 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
   const [isDrawerOpen, setIsDrawerOpen] = React.useState(false);
   const [isPreviewOpen, setIsPreviewOpen] = React.useState(false);
 
+  // UX loading states
+  const [isSessionsLoading, setIsSessionsLoading] = React.useState(false);
+  const [isSessionLoading, setIsSessionLoading] = React.useState(false);
+  const [isUploading, setIsUploading] = React.useState(false);
+
   const abortControllerRef = React.useRef<AbortController | null>(null);
 
   const activeSession = React.useMemo(
@@ -90,6 +101,7 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
     let active = true;
     async function loadSessionsAndDocs() {
       if (!user) return;
+      setIsSessionsLoading(true);
       // ⚡ Performance: fetch sessions + documents in parallel instead of
       // sequentially. The old code awaited listChatSessions(), THEN awaited
       // a dynamic import, THEN awaited the documents query — adding ~150-300ms
@@ -104,7 +116,10 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
           .order('created_at', { ascending: false }),
       ]);
 
-      if (!active) return;
+      if (!active) {
+        setIsSessionsLoading(false);
+        return;
+      }
 
       if (sessResult.status === 'fulfilled') {
         const sessList = sessResult.value;
@@ -130,6 +145,7 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
         }
       }
       // Document library load failure is non-critical — silently ignored.
+      setIsSessionsLoading(false);
     }
     if (user) {
       void loadSessionsAndDocs();
@@ -139,6 +155,7 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
       setMessages([]);
       setAttachedDocs([]);
       setDocuments([]);
+      setIsSessionsLoading(false);
     }
     return () => { active = false; };
   }, [user, showError]);
@@ -149,16 +166,25 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
       if (!activeSessionId || !user) {
         setMessages([]);
         setAttachedDocs([]);
+        setIsSessionLoading(false);
         return;
       }
+      setIsSessionLoading(true);
+      setMessages([]);
+      setAttachedDocs([]);
       try {
         const data = await loadChatSession(activeSessionId);
-        if (!active) return;
+        if (!active) {
+          setIsSessionLoading(false);
+          return;
+        }
         setMessages(data.messages);
         setAttachedDocs(data.documents);
       } catch (err) {
         const message = err instanceof Error ? err.message : 'Unknown error';
         if (active) showError('Failed to load chat', message);
+      } finally {
+        if (active) setIsSessionLoading(false);
       }
     }
     void loadSessionData();
@@ -264,6 +290,7 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
       showError('Document limit reached', `Max ${MAX_DOCUMENTS_PER_CHAT} documents per chat.`);
       return;
     }
+    setIsUploading(true);
     try {
       const result = await uploadDocument({ file, userId: user?.id });
       if (user) {
@@ -282,6 +309,8 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Unknown error';
       showError('Failed to upload document', message);
+    } finally {
+      setIsUploading(false);
     }
   }, [activeSessionId, attachedDocs, user, showError, showSuccess]);
 
@@ -442,6 +471,7 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
 
   const value = React.useMemo<ChatContextValue>(() => ({
     sessions, activeSession, messages, attachedDocs, documents, input, isLoading, isStreaming,
+    isSessionsLoading, isSessionLoading, isUploading,
     selectedCitation, isDrawerOpen, isPreviewOpen,
     setInput, setIsPreviewOpen, setIsDrawerOpen, setSelectedCitation,
     createNewChat, selectChat, deleteChat, renameChat, attachDocument, uploadAndAttachDocument,
@@ -449,6 +479,7 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
     handleInPlaceEdit, deleteSpecificMessage, clearActiveChat, openCitation,
   }), [
     sessions, activeSession, messages, attachedDocs, documents, input, isLoading, isStreaming,
+    isSessionsLoading, isSessionLoading, isUploading,
     selectedCitation, isDrawerOpen, isPreviewOpen,
     createNewChat, selectChat, deleteChat, renameChat, attachDocument, uploadAndAttachDocument,
     handleSubmit, handleSendSuggestion, handleRegenerate, stopGeneration,

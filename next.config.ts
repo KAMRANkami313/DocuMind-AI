@@ -21,20 +21,19 @@ const nextConfig: NextConfig = {
     '@xenova/transformers',
     'onnxruntime-node',
     'sharp',
-    // ⚠️ New heavy native/ESM deps that must be externalized from the
-    // server bundle. Without this, Vercel bundling fails on tesseract.js
-    // (uses native worker threads) and mammoth (uses ESM exports).
+    // ⚠️ Heavy native/ESM deps that must be externalized from the server
+    // bundle. Without this, Vercel bundling fails on tesseract.js (uses
+    // native worker threads) and mammoth (uses ESM exports).
     'tesseract.js',
     'mammoth',
     'xlsx',
     'unpdf',
     'pdfjs-dist',
     // ⚠️ Used for per-page PDF rendering in the OCR fallback path.
-    // @napi-rs/canvas ships prebuilt native binaries (no system deps),
-    // but it must be in serverExternalPackages so Vercel includes the
-    // .node native binding in the function bundle instead of trying to
-    // bundle it as JS (which fails on the `require(crypto)` shim).
     '@napi-rs/canvas',
+    // ⚠️ Used for universal image preprocessing (luminance analysis +
+    // negate / grayscale / normalize / sharpen) before OCR.
+    'jszip',
   ],
   outputFileTracingIncludes: {
     '/api/upload': [
@@ -45,6 +44,8 @@ const nextConfig: NextConfig = {
       './node_modules/mammoth/**/*',
       './node_modules/xlsx/**/*',
       './node_modules/@napi-rs/canvas/**/*',
+      './node_modules/sharp/**/*',
+      './node_modules/jszip/**/*',
     ],
     '/api/chat': [
       './.transformers-cache/**/*',

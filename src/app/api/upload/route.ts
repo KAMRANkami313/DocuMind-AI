@@ -80,13 +80,33 @@ export async function POST(req: NextRequest) {
     });
 
     const rawChunks: ChunkPayload[] = splitTextIntoChunks(pages);
+    // ⚠️ Resilience: do NOT throw when no chunks were extracted. This
+    // happens when OCR yields zero text (e.g. hand-written note on a
+    // very low-contrast background that defeats Tesseract even after
+    // sharp preprocessing). Previously this threw 400 → user lost the
+    // upload. Now we insert a single placeholder chunk so the document
+    // still saves and the chat works — the LLM gets a clear signal that
+    // the document is empty/unreadable and can explain to the user.
+    let finalChunks: ChunkPayload[];
     if (rawChunks.length === 0) {
-      throw badRequest('Document contains no readable text.');
+      finalChunks = [
+        {
+          pageNumber: 1,
+          content:
+            '[No readable text was extracted from this document. ' +
+            'The content may be entirely image-based, hand-written in a ' +
+            'low-contrast style, or in an unsupported format. ' +
+            'If you ask questions about it, the assistant will not be ' +
+            'able to answer from document content.]',
+        },
+      ];
+    } else {
+      finalChunks = rawChunks;
     }
 
-    if (rawChunks.length > UPLOAD_LIMITS.maxChunksPerDocument) {
+    if (finalChunks.length > UPLOAD_LIMITS.maxChunksPerDocument) {
       throw payloadTooLarge(
-        `Document would produce ${rawChunks.length} chunks (max ${UPLOAD_LIMITS.maxChunksPerDocument}).`,
+        `Document would produce ${finalChunks.length} chunks (max ${UPLOAD_LIMITS.maxChunksPerDocument}).`,
       );
     }
 
@@ -116,7 +136,7 @@ export async function POST(req: NextRequest) {
     }
 
     const chunksWithEmbeddings: NewChunkRow[] = [];
-    for (const chunk of rawChunks) {
+    for (const chunk of finalChunks) {
       const embedding = await generateEmbedding(chunk.content);
       chunksWithEmbeddings.push({
         document_id: document.id,

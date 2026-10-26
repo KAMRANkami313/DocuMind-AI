@@ -1,11 +1,17 @@
 // ⚠️ Multi-format dispatcher. The upload route calls `extractPagesFromPdf`
-// for backwards-compatibility reasons (the route was written when PDF was
-// the only format). Internally we now detect the file kind via magic bytes
-// and dispatch to format-specific extractors.
+// for backwards-compatibility reasons. Internally we dispatch by file
+// kind via magic bytes.
 //
-// For PDFs: try unpdf's text extraction first. For pages with sparse text
-// (e.g. slide decks where each slide has a title + an embedded terminal
-// screenshot), fall back to per-page rendering + OCR with tesseract.js.
+// For PDFs: try unpdf's text extraction first. Then ALWAYS run the
+// per-page OCR pipeline (which uses operator-list inspection to decide
+// per-page whether OCR is needed). The previous character-count
+// threshold (50 chars) was broken: slide titles like "Task 5: Reading
+// and Writing Files in HDFS Using PySpark Commands" exceed 50 chars,
+// causing the page to skip OCR even when a terminal screenshot was
+// present below the title. The new operator-list approach (per the
+// universal ingestion spec) checks for paintImageXObject /
+// paintInlineImageXObject in pdfjs's operator list, which is the actual
+// ground truth for whether the page has embedded images.
 
 import { extractText as unpdfExtract } from 'unpdf';
 import {
@@ -18,8 +24,7 @@ import {
   isTextExtension,
   isTextMime,
 } from '@/lib/validation/file';
-import { RETRIEVAL } from '@/lib/constants';
-import { ocrPdfPerPage, looksScanned } from './ocr';
+import { ocrPdfPerPage } from './ocr';
 
 export interface ExtractedPage {
   pageNumber: number;
@@ -36,102 +41,80 @@ function sanitizeText(text: string): string {
 export async function extractPagesFromPdf(buffer: ArrayBuffer): Promise<ExtractedPage[]> {
   // ⚠️ unpdf's extractText() and pdfjs's getDocument() both TRANSFER the
   // ArrayBuffer to their worker thread, detaching the original. We make
-  // TWO defensive copies up-front — one for unpdf's text extraction and
-  // one for the per-page OCR fallback — so each consumer gets its own
-  // fresh buffer. Without this, the second call receives a detached
-  // ArrayBuffer and crashes with "Cannot perform ArrayBuffer.prototype.slice
-  // on a detached ArrayBuffer".
+  // TWO defensive copies up-front.
   const bufferForUnpdf = buffer.slice(0);
   const bufferForOcr = buffer.slice(0);
 
-  // 1. Try unpdf's fast text extraction first.
-  const { text, totalPages } = await unpdfExtract(bufferForUnpdf);
-
-  let initialPages: ExtractedPage[] = [];
-
-  if (!text || totalPages === 0) {
-    // PDF has zero extractable text — fully scanned/image-based PDF.
-    // Skip the unpdf text path entirely and go straight to per-page OCR.
-    initialPages = [];
-  } else if (Array.isArray(text)) {
-    initialPages = text.map((pageText, index) => ({
-      pageNumber: index + 1,
-      text: sanitizeText(pageText.trim()),
-    }));
-  } else {
-    initialPages = [
-      {
-        pageNumber: 1,
-        text: sanitizeText(String(text).trim()),
-      },
-    ];
-  }
-
-  // 2. If unpdf extracted substantive text per page, we're done.
-  if (!looksScanned(initialPages) && initialPages.length > 0) {
-    // Even if the document isn't "scanned" overall, individual pages may
-    // still have sparse text (e.g. a slide deck where each page has a
-    // short title + an embedded image). Run the per-page OCR fallback to
-    // fill those gaps — it only OCRs pages where unpdf's text is sparse,
-    // so it's fast for documents that are mostly text.
-    try {
-      const perPage = await ocrPdfPerPage(bufferForOcr, {
-        unpdfPages: initialPages,
-      });
-      // If the per-page pass yielded anything, prefer it (it's more
-      // granular than the per-document blob). Otherwise fall through to
-      // the original unpdf pages.
-      if (perPage.length > 0) {
-        return perPage
-          .map((p) => ({
-            pageNumber: p.pageNumber,
-            text: sanitizeText(p.text.trim()),
-          }))
-          .filter((p) => p.text.length > 0);
-      }
-    } catch (err) {
-      // Per-page OCR fallback failed — log and continue with unpdf's
-      // text-only extraction. The document is still usable; we just
-      // don't get the embedded-image content.
-      const message = err instanceof Error ? err.message : String(err);
-      console.warn('[extractor] Per-page OCR fallback failed:', message);
-    }
-    return initialPages.filter((p) => p.text.length > 0);
-  }
-
-  // 3. PDF looks scanned overall (or unpdf returned nothing) — run the
-  // full per-page OCR pipeline. This iterates pages, renders each
-  // sparse-text page to a canvas via @napi-rs/canvas, and OCRs the
-  // canvas with tesseract.js.
+  // 1. Try unpdf's fast text extraction first (for the per-page text
+  //    hint that ocrPdfPerPage can use to skip pages with no images).
+  let unpdfPages: ExtractedPage[] = [];
   try {
-    const ocrPages = await ocrPdfPerPage(bufferForOcr, {
-      unpdfPages: initialPages,
-    });
-    if (ocrPages.length === 0) {
-      throw new Error(
-        'No text could be extracted from this PDF (it appears to be scanned and OCR failed). ' +
-          'Please upload a text-based PDF or pre-process with Adobe Acrobat → "Recognize Text".',
-      );
+    const { text, totalPages } = await unpdfExtract(bufferForUnpdf);
+    if (text && totalPages > 0) {
+      if (Array.isArray(text)) {
+        unpdfPages = text.map((pageText, index) => ({
+          pageNumber: index + 1,
+          text: sanitizeText(pageText.trim()),
+        }));
+      } else {
+        unpdfPages = [
+          {
+            pageNumber: 1,
+            text: sanitizeText(String(text).trim()),
+          },
+        ];
+      }
     }
-    return ocrPages.map((p) => ({
-      pageNumber: p.pageNumber,
-      text: sanitizeText(p.text.trim()),
-    }));
   } catch (err) {
-    // Final fallback — if per-page OCR also fails (e.g. @napi-rs/canvas
-    // native binary missing), return whatever unpdf gave us.
-    if (initialPages.length > 0) {
-      const message = err instanceof Error ? err.message : String(err);
-      console.warn('[extractor] Full per-page OCR failed, returning unpdf text only:', message);
-      return initialPages;
-    }
-    throw err;
+    // unpdf failed (rare — usually means the PDF is corrupt or uses
+    // features unpdf doesn't support). Continue to per-page OCR.
+    const message = err instanceof Error ? err.message : String(err);
+    console.warn('[extractor] unpdf.extractText failed, going straight to per-page OCR:', message);
   }
+
+  // 2. ALWAYS run the per-page OCR pipeline. ocrPdfPerPage uses the
+  //    operator list to decide per-page:
+  //      - Pure text page (no images): returns digital text, skips OCR
+  //      - Pure scanned page (no text, has images or nothing): OCR
+  //      - Hybrid page (text + images): merge digital text + OCR text
+  //    This eliminates the broken 50-char threshold and handles all
+  //    the user's reported cases (slide decks with terminal screenshots,
+  //    notebooks with Matplotlib charts, certificates with typed names).
+  try {
+    const perPage = await ocrPdfPerPage(bufferForOcr, {
+      unpdfPages,
+    });
+    if (perPage.length > 0) {
+      return perPage
+        .map((p) => ({
+          pageNumber: p.pageNumber,
+          text: sanitizeText(p.text.trim()),
+        }))
+        .filter((p) => p.text.length > 0);
+    }
+  } catch (err) {
+    // Per-page OCR failed (e.g. @napi-rs/canvas native binary missing
+    // on Vercel cold start). Fall back to whatever unpdf gave us.
+    const message = err instanceof Error ? err.message : String(err);
+    console.warn('[extractor] Per-page OCR pipeline failed, falling back to unpdf text only:', message);
+  }
+
+  // 3. Final fallback: return unpdf's text only (no embedded-image OCR).
+  if (unpdfPages.length > 0) {
+    return unpdfPages.filter((p) => p.text.length > 0);
+  }
+
+  // 4. Total failure — throw an actionable error. The upload route
+  //    catches this and surfaces a friendly message.
+  throw new Error(
+    'No text could be extracted from this PDF. The file may be corrupt, ' +
+      'password-protected, or use features not supported by pdfjs. ' +
+      'Try uploading a different format or pre-processing with Adobe Acrobat.',
+  );
 }
 
 /**
  * Extract text from a plain text / Markdown / CSV buffer.
- * Used when the upload is text-only (no parsing required).
  */
 export async function extractPagesFromText(buffer: ArrayBuffer): Promise<ExtractedPage[]> {
   const text = new TextDecoder('utf-8', { fatal: false }).decode(buffer).trim();
@@ -143,8 +126,7 @@ export async function extractPagesFromText(buffer: ArrayBuffer): Promise<Extract
 
 /**
  * Dispatch based on file kind. The upload route already validated the
- * file type via `validateUploadedFile`, so we just look at the file's
- * mime + extension here.
+ * file type via `validateUploadedFile`.
  */
 export async function extractPagesFromUpload(args: {
   file: { name: string; type: string };
@@ -152,12 +134,12 @@ export async function extractPagesFromUpload(args: {
 }): Promise<ExtractedPage[]> {
   const { file, buffer } = args;
 
-  // PDF (text-based OR scanned) — uses unpdf + per-page OCR fallback
+  // PDF (text-based OR scanned OR hybrid) — uses unpdf + per-page OCR
   if (file.type === 'application/pdf' || /\.pdf$/i.test(file.name)) {
     return extractPagesFromPdf(buffer);
   }
 
-  // Word .docx — mammoth
+  // Word .docx — mammoth (text) + jszip (word/media/ images)
   if (isWordMime(file.type) || isWordExtension(file.name)) {
     const { extractTextFromDocx } = await import('./word-extractor');
     return extractTextFromDocx(buffer);
@@ -169,7 +151,7 @@ export async function extractPagesFromUpload(args: {
     return extractTextFromExcel(buffer);
   }
 
-  // Image — tesseract.js OCR
+  // Image — sharp preprocessing + tesseract.js OCR
   if (isImageMime(file.type) || isImageExtension(file.name)) {
     const { extractTextFromImage } = await import('./image-extractor');
     return extractTextFromImage(buffer);
@@ -183,7 +165,3 @@ export async function extractPagesFromUpload(args: {
   // Unknown — best effort: try plain text decode
   return extractPagesFromText(buffer);
 }
-
-// Re-export for downstream callers (chunker, tests, etc.)
-export type { ExtractedPage as _ReExported } from './extractor';
-void RETRIEVAL; // not used here directly, but keeps the import valid for tree-shaking
